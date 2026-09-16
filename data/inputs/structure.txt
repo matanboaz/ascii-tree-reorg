@@ -1,0 +1,13 @@
+my_project/
+├── configs/
+│   ├── config.yaml
+│   └── params.json
+├── data/
+│   ├── raw/
+│   │   ├── dataset.csv
+│   │   └── records.parquet
+│   └── processed/
+│       └── model_artifacts.pkl
+└── src/
+    ├── __init__.py
+    └── main.py

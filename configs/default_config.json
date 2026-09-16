@@ -1,0 +1,8 @@
+{
+    "indent_width": 4,
+    "move_files": false,
+    "default_input_tree": "data/inputs/structure.txt",
+    "default_input_source": "data/inputs/raw_archive",
+    "default_output_root": "data/outputs",
+    "log_level": "INFO"
+}

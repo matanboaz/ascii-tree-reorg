@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ascii_tree_reorg"
+version = "0.1.0"
+description = "Reorganize flat filesystem dumps into structured hierarchies from ASCII trees."
+authors = [{ name = "Boaz Refael Matan" }]
+readme = "docs/PRD.md"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.optional-dependencies]
+ui = ["streamlit>=1.20.0"]
+test = ["pytest>=7.0.0"]
+
+[project.scripts]
+ascii-reorg = "ascii_tree_reorg.app:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
