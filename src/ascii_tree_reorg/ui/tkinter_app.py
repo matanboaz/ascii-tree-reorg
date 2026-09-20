@@ -1,5 +1,7 @@
+"""Tkinter Desktop UI with dual capabilities: Reconstruction and Tree Generation."""
+
+import io
 import os
-import subprocess
 import sys
 import tempfile
 import threading
@@ -7,270 +9,307 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from ..core.parser import AsciiTreeParser
-from ..engine.reorganizer import DirectoryReorganizer
+# Ensure the package root is in sys.path when executed directly
+repo_root = Path(__file__).resolve().parent.parent.parent.parent
+src_path = repo_root / "src"
+if str(src_path) not in sys.path:
+    sys.path.insert(0, str(src_path))
+
+from ascii_tree_reorg.core.auditor import StructureAuditor
+from ascii_tree_reorg.core.generator import DirectoryTreeGenerator, GeneratorOptions
+from ascii_tree_reorg.core.parser import AsciiTreeParser
+from ascii_tree_reorg.engine.reorganizer import DirectoryReorganizer
 
 
-class TextRedirector:
-    """Redirects stdout/stderr writes directly into a Tkinter Text widget."""
+class TextRedirector(io.StringIO):
+    """Redirects stdout/stderr streams to a Tkinter Text widget safely."""
 
     def __init__(self, widget: tk.Text):
+        super().__init__()
         self.widget = widget
 
-    def write(self, text: str) -> None:
-        def _append():
-            self.widget.insert(tk.END, text)
-            self.widget.see(tk.END)
+    def write(self, s: str):
+        self.widget.configure(state="normal")
+        self.widget.insert(tk.END, s)
+        self.widget.see(tk.END)
+        self.widget.configure(state="disabled")
 
-        self.widget.after(0, _append)
-
-    def flush(self) -> None:
+    def flush(self):
         pass
 
 
 class AsciiTreeReorgApp(tk.Tk):
-    """Main desktop GUI for ASCII Tree Reorganization."""
-
     def __init__(self):
         super().__init__()
-        self.title("ASCII Tree Directory Reorganizer")
-        self.geometry("960x780")
-        self.minsize(820, 640)
+        self.title("ASCII Tree Reorganizer & Generator v0.2.0")
+        self.geometry("980x820")
+        self.minsize(800, 640)
 
-        self.repo_root = Path(__file__).resolve().parent.parent.parent.parent
+        # Apply clean ttk theme if available
+        self.style = ttk.Style(self)
+        if "clam" in self.style.theme_names():
+            self.style.theme_use("clam")
 
-        self._init_variables()
-        self._build_ui()
+        self._build_notebook()
 
-    def _init_variables(self) -> None:
-        default_source = self.repo_root / "data" / "inputs" / "raw_archive"
-        default_dest = self.repo_root / "data" / "outputs"
+    def _build_notebook(self):
+        notebook = ttk.Notebook(self)
+        notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        self.src_var = tk.StringVar(value=str(default_source) if default_source.exists() else "")
-        self.dst_var = tk.StringVar(value=str(default_dest) if default_dest.exists() else "")
+        # Tab 1: Reconstruct Directory Structure
+        reconstruct_frame = ttk.Frame(notebook, padding=10)
+        notebook.add(reconstruct_frame, text=" 🔨 Reconstruct from Tree ")
+        self._init_reconstruct_tab(reconstruct_frame)
+
+        # Tab 2: Generate Tree from Folder
+        generate_frame = ttk.Frame(notebook, padding=10)
+        notebook.add(generate_frame, text=" 📝 Generate Tree from Folder ")
+        self._init_generate_tab(generate_frame)
+
+    # -------------------------------------------------------------------------
+    # TAB 1: RECONSTRUCTION LOGIC
+    # -------------------------------------------------------------------------
+    def _init_reconstruct_tab(self, parent: ttk.Frame):
+        # Paths frame
+        paths_frame = ttk.LabelFrame(parent, text="Directories", padding=10)
+        paths_frame.pack(fill=tk.X, pady=5)
+
+        ttk.Label(paths_frame, text="Source Folder (Flat Files):").grid(row=0, column=0, sticky=tk.W, pady=2)
+        self.src_entry = ttk.Entry(paths_frame, width=65)
+        self.src_entry.grid(row=0, column=1, padx=5, pady=2, sticky=tk.EW)
+        default_src = (repo_root / "data" / "inputs" / "raw_archive").resolve()
+        self.src_entry.insert(0, str(default_src))
+        ttk.Button(paths_frame, text="Browse...", command=self._browse_src).grid(row=0, column=2, padx=2)
+
+        ttk.Label(paths_frame, text="Target Output Root:").grid(row=1, column=0, sticky=tk.W, pady=2)
+        self.dest_entry = ttk.Entry(paths_frame, width=65)
+        self.dest_entry.grid(row=1, column=1, padx=5, pady=2, sticky=tk.EW)
+        default_dst = (repo_root / "data" / "outputs").resolve()
+        self.dest_entry.insert(0, str(default_dst))
+        ttk.Button(paths_frame, text="Browse...", command=self._browse_dest).grid(row=1, column=2, padx=2)
+
+        paths_frame.columnconfigure(1, weight=1)
+
+        # Options frame
+        opts_frame = ttk.LabelFrame(parent, text="Reconstruction Settings", padding=10)
+        opts_frame.pack(fill=tk.X, pady=5)
+
         self.move_var = tk.BooleanVar(value=False)
         self.overwrite_var = tk.BooleanVar(value=True)
         self.clean_relocated_var = tk.BooleanVar(value=True)
+
+        ttk.Checkbutton(opts_frame, text="Move files (delete source)", variable=self.move_var).pack(
+            side=tk.LEFT, padx=6
+        )
+        ttk.Checkbutton(opts_frame, text="Overwrite existing files", variable=self.overwrite_var).pack(
+            side=tk.LEFT, padx=6
+        )
+        ttk.Checkbutton(opts_frame, text="Clean relocated old files", variable=self.clean_relocated_var).pack(
+            side=tk.LEFT, padx=6
+        )
+
+        ttk.Label(opts_frame, text="Indent Width:").pack(side=tk.LEFT, padx=(15, 2))
         self.indent_var = tk.IntVar(value=4)
-        self.status_var = tk.StringVar(value="Ready")
+        ttk.Spinbox(opts_frame, from_=2, to=8, textvariable=self.indent_var, width=4).pack(side=tk.LEFT)
 
-    def _build_ui(self) -> None:
-        # Paths Frame
-        frm_paths = ttk.LabelFrame(self, text="Path Configurations", padding=10)
-        frm_paths.pack(fill=tk.X, padx=12, pady=6)
+        # ASCII Tree Text Editor
+        tree_frame = ttk.LabelFrame(parent, text="ASCII Tree Specification", padding=10)
+        tree_frame.pack(fill=tk.BOTH, expand=True, pady=5)
 
-        # Source Dir
-        ttk.Label(frm_paths, text="Source Folder:").grid(row=0, column=0, sticky=tk.W, pady=4)
-        ttk.Entry(frm_paths, textvariable=self.src_var, width=70).grid(row=0, column=1, sticky=tk.EW, padx=6)
-        ttk.Button(frm_paths, text="Browse...", command=self._browse_source).grid(row=0, column=2, padx=2)
-
-        # Dest Dir
-        ttk.Label(frm_paths, text="Destination:").grid(row=1, column=0, sticky=tk.W, pady=4)
-        ttk.Entry(frm_paths, textvariable=self.dst_var, width=70).grid(row=1, column=1, sticky=tk.EW, padx=6)
-        ttk.Button(frm_paths, text="Browse...", command=self._browse_dest).grid(row=1, column=2, padx=2)
-
-        frm_paths.columnconfigure(1, weight=1)
-
-        # Options Frame
-        frm_opts = ttk.LabelFrame(self, text="Execution Options", padding=10)
-        frm_opts.pack(fill=tk.X, padx=12, pady=4)
-
-        ttk.Checkbutton(frm_opts, text="Move files (cut instead of copy)", variable=self.move_var).pack(
-            side=tk.LEFT, padx=6
-        )
-        ttk.Checkbutton(frm_opts, text="Overwrite existing files", variable=self.overwrite_var).pack(
-            side=tk.LEFT, padx=6
-        )
-        ttk.Checkbutton(
-            frm_opts,
-            text="Clean relocated / orphan files",
-            variable=self.clean_relocated_var,
-        ).pack(side=tk.LEFT, padx=6)
-
-        ttk.Label(frm_opts, text="Indent Width:").pack(side=tk.LEFT, padx=(16, 4))
-        ttk.Spinbox(frm_opts, from_=2, to=8, textvariable=self.indent_var, width=4).pack(side=tk.LEFT)
-
-        # Tree Editor Frame
-        frm_tree = ttk.LabelFrame(self, text="ASCII Directory Structure", padding=10)
-        frm_tree.pack(fill=tk.BOTH, expand=True, padx=12, pady=6)
-
-        frm_tree_toolbar = ttk.Frame(frm_tree)
-        frm_tree_toolbar.pack(fill=tk.X, pady=(0, 4))
-
-        ttk.Button(frm_tree_toolbar, text="📂 Load Tree File...", command=self._load_tree_file).pack(
-            side=tk.LEFT, padx=2
-        )
-        ttk.Button(frm_tree_toolbar, text="🧹 Clear Text", command=self._clear_tree_text).pack(
+        btn_toolbar = ttk.Frame(tree_frame)
+        btn_toolbar.pack(fill=tk.X, pady=2)
+        ttk.Button(btn_toolbar, text="Load Tree File...", command=self._load_tree_file).pack(side=tk.LEFT, padx=2)
+        ttk.Button(btn_toolbar, text="Clear", command=lambda: self.tree_text.delete("1.0", tk.END)).pack(
             side=tk.LEFT, padx=2
         )
 
-        self.txt_tree = tk.Text(frm_tree, wrap=tk.NONE, font=("Consolas", 10), height=12)
-        sb_tree_y = ttk.Scrollbar(frm_tree, orient=tk.VERTICAL, command=self.txt_tree.yview)
-        sb_tree_x = ttk.Scrollbar(frm_tree, orient=tk.HORIZONTAL, command=self.txt_tree.xview)
-        self.txt_tree.configure(xscrollcommand=sb_tree_x.set, yscrollcommand=sb_tree_y.set)
+        self.tree_text = tk.Text(tree_frame, height=10, wrap=tk.NONE, font=("Consolas", 10))
+        self.tree_text.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
+        tree_scroll = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=self.tree_text.yview)
+        tree_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.tree_text.configure(yscrollcommand=tree_scroll.set)
 
-        sb_tree_y.pack(side=tk.RIGHT, fill=tk.Y)
-        sb_tree_x.pack(side=tk.BOTTOM, fill=tk.X)
-        self.txt_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        self._load_initial_tree_template()
-
-        # Action Button & Progress
-        frm_action = ttk.Frame(self, padding=6)
-        frm_action.pack(fill=tk.X, padx=12, pady=4)
-
-        self.btn_run = ttk.Button(
-            frm_action,
-            text="🚀 Reconstruct Directory Structure",
-            command=self._start_processing,
-        )
-        self.btn_run.pack(side=tk.LEFT, padx=4)
-
-        self.btn_open_dest = ttk.Button(
-            frm_action,
-            text="📁 Open Destination Folder",
-            state=tk.DISABLED,
-            command=self._open_destination,
-        )
-        self.btn_open_dest.pack(side=tk.LEFT, padx=4)
-
-        self.progress_bar = ttk.Progressbar(frm_action, mode="determinate")
-        self.progress_bar.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=10)
-
-        self.lbl_status = ttk.Label(frm_action, textvariable=self.status_var, font=("Segoe UI", 9, "italic"))
-        self.lbl_status.pack(side=tk.RIGHT, padx=4)
-
-        # Log Terminal Frame
-        frm_log = ttk.LabelFrame(self, text="Console Output & Audit Log", padding=10)
-        frm_log.pack(fill=tk.BOTH, expand=True, padx=12, pady=(4, 12))
-
-        self.txt_log = tk.Text(frm_log, wrap=tk.WORD, font=("Consolas", 9), background="#1e1e1e", foreground="#d4d4d4")
-        sb_log = ttk.Scrollbar(frm_log, orient=tk.VERTICAL, command=self.txt_log.yview)
-        self.txt_log.configure(yscrollcommand=sb_log.set)
-
-        sb_log.pack(side=tk.RIGHT, fill=tk.Y)
-        self.txt_log.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-    def _browse_source(self) -> None:
-        path = filedialog.askdirectory(title="Select Unorganized Source Folder")
-        if path:
-            self.src_var.set(path)
-
-    def _browse_dest(self) -> None:
-        path = filedialog.askdirectory(title="Select Target Destination Folder")
-        if path:
-            self.dst_var.set(path)
-
-    def _load_tree_file(self) -> None:
-        path = filedialog.askopenfilename(
-            title="Open ASCII Tree File",
-            filetypes=[("Text & Log Files", "*.txt *.log *.md"), ("All Files", "*.*")],
-        )
-        if path:
-            try:
-                content = Path(path).read_text(encoding="utf-8")
-                self.txt_tree.delete("1.0", tk.END)
-                self.txt_tree.insert(tk.END, content)
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to read file:\n{e}")
-
-    def _clear_tree_text(self) -> None:
-        self.txt_tree.delete("1.0", tk.END)
-
-    def _load_initial_tree_template(self) -> None:
-        default_tree_file = self.repo_root / "data" / "inputs" / "structure.txt"
-        if default_tree_file.exists():
-            try:
-                content = default_tree_file.read_text(encoding="utf-8")
-                self.txt_tree.insert(tk.END, content)
-                return
-            except Exception:
-                pass
-
-        sample = (
-            "project_root/\n"
+        default_tree = (
+            "my_project/\n"
             "├── configs/\n"
-            "│   └── config.yaml\n"
+            "│   ├── config.yaml\n"
+            "│   └── params.json\n"
             "├── data/\n"
-            "│   └── raw/\n"
+            "│   ├── dataset.csv\n"
+            "│   └── records.parquet\n"
+            "├── models/\n"
+            "│   └── model.pkl\n"
             "└── src/\n"
             "    └── main.py\n"
         )
-        self.txt_tree.insert(tk.END, sample)
+        self.tree_text.insert(tk.END, default_tree)
 
-    def _open_destination(self) -> None:
-        path = Path(self.dst_var.get().strip()).resolve()
-        if path.exists():
-            if sys.platform == "win32":
-                os.startfile(str(path))
-            elif sys.platform == "darwin":
-                subprocess.run(["open", str(path)])
-            else:
-                subprocess.run(["xdg-open", str(path)])
+        # Progress Bar & Status Line
+        progress_frame = ttk.Frame(parent, padding=(0, 4))
+        progress_frame.pack(fill=tk.X)
 
-    def _update_progress(self, value: float, status_text: str) -> None:
-        self.progress_bar["value"] = value
-        self.status_var.set(status_text)
+        self.prog_var = tk.DoubleVar(value=0.0)
+        self.prog_bar = ttk.Progressbar(progress_frame, variable=self.prog_var, maximum=100)
+        self.prog_bar.pack(fill=tk.X, side=tk.TOP, pady=(0, 2))
 
-    def _start_processing(self) -> None:
-        src = self.src_var.get().strip()
-        dst = self.dst_var.get().strip()
-        tree = self.txt_tree.get("1.0", tk.END).strip()
+        self.lbl_status = ttk.Label(progress_frame, text="Ready", font=("Segoe UI", 9))
+        self.lbl_status.pack(side=tk.LEFT)
 
-        if not src or not dst:
-            messagebox.showwarning("Missing Fields", "Please specify both source and destination folders.")
-            return
+        # Action Buttons
+        action_box = ttk.Frame(parent, padding=(0, 4))
+        action_box.pack(fill=tk.X)
 
-        if not tree:
-            messagebox.showwarning("Missing Tree", "Please paste or load an ASCII directory tree.")
-            return
+        self.reorg_btn = ttk.Button(
+            action_box, text="🚀 Reconstruct Directory Structure", command=self._start_reconstruction
+        )
+        self.reorg_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
 
-        self.btn_run.configure(state=tk.DISABLED)
-        self.btn_open_dest.configure(state=tk.DISABLED)
-        self.txt_log.delete("1.0", tk.END)
-        self.progress_bar["value"] = 0
-        self.status_var.set("Processing...")
+        self.open_dest_btn = ttk.Button(
+            action_box, text="📂 Open Destination Folder", command=self._open_destination, state="disabled"
+        )
+        self.open_dest_btn.pack(side=tk.RIGHT)
 
-        threading.Thread(target=self._run_process, daemon=True).start()
+        # Logs Console
+        log_frame = ttk.LabelFrame(parent, text="Execution Logs & Audit", padding=8)
+        log_frame.pack(fill=tk.BOTH, expand=True, pady=5)
 
-    def _run_process(self) -> None:
+        self.log_text = tk.Text(
+            log_frame, height=8, state="disabled", font=("Consolas", 9), bg="#1e1e1e", fg="#d4d4d4"
+        )
+        self.log_text.pack(fill=tk.BOTH, expand=True)
+
+    # -------------------------------------------------------------------------
+    # TAB 2: TREE GENERATION LOGIC
+    # -------------------------------------------------------------------------
+    def _init_generate_tab(self, parent: ttk.Frame):
+        gen_paths = ttk.LabelFrame(parent, text="Target Directory", padding=10)
+        gen_paths.pack(fill=tk.X, pady=5)
+
+        ttk.Label(gen_paths, text="Folder to Model:").grid(row=0, column=0, sticky=tk.W, pady=2)
+        self.gen_folder_entry = ttk.Entry(gen_paths, width=65)
+        self.gen_folder_entry.grid(row=0, column=1, padx=5, pady=2, sticky=tk.EW)
+        self.gen_folder_entry.insert(0, str(Path.cwd()))
+        ttk.Button(gen_paths, text="Browse...", command=self._browse_gen_folder).grid(row=0, column=2, padx=2)
+        gen_paths.columnconfigure(1, weight=1)
+
+        # Scan Controls
+        gen_opts = ttk.LabelFrame(parent, text="Scan Controls", padding=10)
+        gen_opts.pack(fill=tk.X, pady=5)
+
+        self.include_files_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            gen_opts, text="Include files (uncheck for folders only)", variable=self.include_files_var
+        ).pack(side=tk.LEFT, padx=10)
+
+        ttk.Label(gen_opts, text="Max Depth:").pack(side=tk.LEFT, padx=(15, 2))
+        self.max_depth_spin = ttk.Spinbox(gen_opts, from_=0, to=20, width=5)
+        self.max_depth_spin.set("0")  # 0 = Unlimited
+        self.max_depth_spin.pack(side=tk.LEFT, padx=2)
+        ttk.Label(gen_opts, text="(0 = unlimited)").pack(side=tk.LEFT, padx=2)
+
+        ttk.Button(gen_opts, text="⚡ Scan and Generate ASCII", command=self._generate_ascii_tree).pack(
+            side=tk.RIGHT, padx=5
+        )
+
+        # Output Text View
+        out_frame = ttk.LabelFrame(parent, text="Generated ASCII Output", padding=10)
+        out_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+
+        tool_bar = ttk.Frame(out_frame)
+        tool_bar.pack(fill=tk.X, pady=2)
+
+        ttk.Button(tool_bar, text="📋 Copy to Clipboard", command=self._copy_generated_to_clipboard).pack(
+            side=tk.LEFT, padx=2
+        )
+        ttk.Button(tool_bar, text="💾 Save to .txt File...", command=self._save_generated_file).pack(
+            side=tk.LEFT, padx=2
+        )
+
+        self.gen_text_out = tk.Text(out_frame, wrap=tk.NONE, font=("Consolas", 10))
+        self.gen_text_out.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
+        gen_scroll = ttk.Scrollbar(out_frame, orient=tk.VERTICAL, command=self.gen_text_out.yview)
+        gen_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.gen_text_out.configure(yscrollcommand=gen_scroll.set)
+
+    # -------------------------------------------------------------------------
+    # TAB 1 HANDLERS & RECONSTRUCTION WORKER
+    # -------------------------------------------------------------------------
+    def _browse_src(self):
+        d = filedialog.askdirectory(initialdir=self.src_entry.get().strip())
+        if d:
+            self.src_entry.delete(0, tk.END)
+            self.src_entry.insert(0, d)
+
+    def _browse_dest(self):
+        d = filedialog.askdirectory(initialdir=self.dest_entry.get().strip())
+        if d:
+            self.dest_entry.delete(0, tk.END)
+            self.dest_entry.insert(0, d)
+
+    def _load_tree_file(self):
+        fpath = filedialog.askopenfilename(
+            title="Select ASCII Tree Text File",
+            filetypes=[("Text Files", "*.txt"), ("Markdown Files", "*.md"), ("All Files", "*.*")],
+        )
+        if fpath:
+            try:
+                content = Path(fpath).read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                content = Path(fpath).read_text(encoding="latin-1")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to load file:\n{e}")
+                return
+            self.tree_text.delete("1.0", tk.END)
+            self.tree_text.insert(tk.END, content)
+
+    def _open_destination(self):
+        dest_path = Path(self.dest_entry.get().strip())
+        if dest_path.exists():
+            os.startfile(str(dest_path))
+        else:
+            messagebox.showwarning("Not Found", f"Destination path does not exist:\n{dest_path}")
+
+    def _update_progress(self, val: float, msg: str):
+        self.prog_var.set(val)
+        self.lbl_status.config(text=msg)
+
+    def _start_reconstruction(self):
+        self.reorg_btn.configure(state="disabled")
+        self.open_dest_btn.configure(state="disabled")
+        self.prog_var.set(0.0)
+        self.lbl_status.config(text="Processing...")
+        threading.Thread(target=self._run_reconstruction_worker, daemon=True).start()
+
+    def _run_reconstruction_worker(self):
         old_stdout = sys.stdout
-        old_stderr = sys.stderr
-        redirector = TextRedirector(self.txt_log)
-        sys.stdout = redirector
-        sys.stderr = redirector
+        sys.stdout = TextRedirector(self.log_text)
 
-        tmp_tree = None
         try:
-            src_path = Path(self.src_var.get().strip()).resolve()
-            dest_path = Path(self.dst_var.get().strip()).resolve()
-            tree_text = self.txt_tree.get("1.0", tk.END).strip()
-
-            print("================= DIAGNOSTIC RUN =================")
-            print(f"[DEBUG] Source Directory      : {src_path}")
-            print(f"[DEBUG] Destination Directory : {dest_path}")
-            print(f"[DEBUG] Same Directory?       : {src_path == dest_path}")
-            print(f"[DEBUG] Overwrite?            : {self.overwrite_var.get()}")
-            print(f"[DEBUG] Clean Relocated?      : {self.clean_relocated_var.get()}")
-            print(f"[DEBUG] Move Files?           : {self.move_var.get()}")
+            src_path = Path(self.src_entry.get().strip())
+            dest_path = Path(self.dest_entry.get().strip())
+            tree_text = self.tree_text.get("1.0", tk.END).strip()
 
             if not src_path.is_dir():
-                print(f"[ERROR] Source does not exist: {src_path}")
-                messagebox.showerror("Error", f"Source directory not found:\n{src_path}")
+                messagebox.showerror("Error", f"Source path is not a valid directory:\n{src_path}")
+                return
+            if not tree_text:
+                messagebox.showerror("Error", "ASCII tree specification cannot be empty.")
                 return
 
             with tempfile.NamedTemporaryFile("w+", encoding="utf-8", delete=False) as tf:
                 tf.write(tree_text)
                 tmp_tree = Path(tf.name)
 
-            parser = AsciiTreeParser(tmp_tree, fallback_width=self.indent_var.get())
-            nodes = parser.parse(target_root_name=dest_path.name)
+            try:
+                parser = AsciiTreeParser(tmp_tree, fallback_width=self.indent_var.get())
+                nodes = parser.parse()
+            finally:
+                if tmp_tree.exists():
+                    tmp_tree.unlink()
 
-            print(f"\n[DEBUG] Total Parsed Nodes: {len(nodes)}")
-            for n in nodes[:8]:
-                print(f"   -> {'[DIR] ' if n.is_directory else '[FILE]'} {n.name:<25} | Target: {dest_path / n.relative_path}")
-            if len(nodes) > 8:
-                print(f"   ... and {len(nodes) - 8} more entries.")
+            if not nodes:
+                print("[WARN] No valid nodes parsed from the tree.")
+                return
 
             reorganizer = DirectoryReorganizer(
                 source_dir=src_path,
@@ -280,48 +319,105 @@ class AsciiTreeReorgApp(tk.Tk):
                 clean_relocated=self.clean_relocated_var.get(),
             )
 
-            print(f"\n[DEBUG] Indexed Source Files: {len(reorganizer.source_index)} unique filenames found in source.")
-            existing_in_dest = list(dest_path.rglob("*")) if dest_path.exists() else []
-            print(f"[DEBUG] Existing Items in Dest: {len(existing_in_dest)} items found on disk.")
+            print("--- Pre-flight Audit ---")
+            auditor = StructureAuditor(nodes, reorganizer.source_index)
+            auditor.run_audit()
+            print("------------------------\n")
 
-            print("\n---------------- EXECUTION LOG ----------------")
+            print("--- Starting File Placement & Sync ---")
 
-            # Execute cleanups (parent orphans + old positions)
+            # 1. Clean relocated old files once across the whole desired tree
             if reorganizer.clean_relocated:
-                reorganizer._purge_parent_orphans(nodes)
                 reorganizer._cleanup_old_positions(nodes)
 
-            total = len(nodes)
+            # 2. Place each node incrementally and update progress bar
+            total_nodes = len(nodes)
             for idx, node in enumerate(nodes, start=1):
                 reorganizer._place_single_node(node)
-                pct = (idx / total) * 100.0
-                self.after(0, self._update_progress, pct, f"{idx}/{total}: {node.name}")
+                pct = (idx / total_nodes) * 100.0
+                self.after(0, self._update_progress, pct, f"Processing {idx}/{total_nodes}: {node.name}")
 
             self.after(0, self._update_progress, 100.0, "Complete")
-            print("=================================================")
-            print("[DONE] Execution finished successfully.")
-            self.after(0, lambda: self.btn_open_dest.configure(state="normal"))
+            print("\n[SUCCESS] Operation finished.")
+            self.after(0, lambda: self.open_dest_btn.configure(state="normal"))
+            messagebox.showinfo("Complete", f"Hierarchy synchronized successfully at:\n{dest_path}")
 
         except Exception as e:
-            import traceback
-
-            traceback.print_exc()
-            print(f"\n[CRASH] {e}")
-            messagebox.showerror("Execution Error", str(e))
+            print(f"\n[ERROR] {e}")
+            messagebox.showerror("Execution Failed", str(e))
         finally:
-            if tmp_tree and tmp_tree.exists():
-                try:
-                    tmp_tree.unlink()
-                except OSError:
-                    pass
             sys.stdout = old_stdout
-            sys.stderr = old_stderr
-            self.after(0, lambda: self.btn_run.configure(state="normal"))
+            self.after(0, lambda: self.reorg_btn.configure(state="normal"))
+
+    # -------------------------------------------------------------------------
+    # TAB 2 HANDLERS: TREE GENERATION
+    # -------------------------------------------------------------------------
+    def _browse_gen_folder(self):
+        d = filedialog.askdirectory(initialdir=self.gen_folder_entry.get().strip())
+        if d:
+            self.gen_folder_entry.delete(0, tk.END)
+            self.gen_folder_entry.insert(0, d)
+
+    def _generate_ascii_tree(self):
+        target_dir = Path(self.gen_folder_entry.get().strip())
+        if not target_dir.is_dir():
+            messagebox.showerror("Invalid Path", "Selected folder does not exist.")
+            return
+
+        depth_val = int(self.max_depth_spin.get())
+        max_depth = None if depth_val <= 0 else depth_val
+
+        options = GeneratorOptions(
+            include_files=self.include_files_var.get(),
+            max_depth=max_depth,
+            indent_step=4,
+        )
+
+        generator = DirectoryTreeGenerator(target_dir, options=options)
+        try:
+            tree_output = generator.generate()
+            self.gen_text_out.delete("1.0", tk.END)
+            self.gen_text_out.insert(tk.END, tree_output)
+        except Exception as e:
+            messagebox.showerror("Generation Error", str(e))
+
+    def _copy_generated_to_clipboard(self):
+        text = self.gen_text_out.get("1.0", tk.END).strip()
+        if not text:
+            messagebox.showwarning("Clipboard", "No generated tree to copy.")
+            return
+        self.clipboard_clear()
+        self.clipboard_append(text)
+        messagebox.showinfo("Clipboard", "ASCII tree copied to clipboard!")
+
+    def _save_generated_file(self):
+        text = self.gen_text_out.get("1.0", tk.END).strip()
+        if not text:
+            return
+        f = filedialog.asksaveasfilename(
+            defaultextension=".txt",
+            filetypes=[("Text file", "*.txt"), ("Markdown file", "*.md")],
+        )
+        if f:
+            Path(f).write_text(text, encoding="utf-8")
+            messagebox.showinfo("Saved", f"Tree exported successfully to {f}")
 
 
-def launch_gui() -> None:
+# -------------------------------------------------------------------------
+# ENTRYPOINT EXPORTS
+# -------------------------------------------------------------------------
+def launch_gui():
+    """Primary entrypoint for the GUI application."""
     app = AsciiTreeReorgApp()
     app.mainloop()
+
+
+# Backward-compatible alias for runners importing run_gui
+run_gui = launch_gui
+
+
+def main():
+    launch_gui()
 
 
 if __name__ == "__main__":

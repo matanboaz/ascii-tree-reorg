@@ -27,3 +27,5 @@ data/outputs/*
 !data/outputs/.gitkeep
 models/*
 !models/.gitkeep
+
+*.spec

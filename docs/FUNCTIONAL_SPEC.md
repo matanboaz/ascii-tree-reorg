@@ -1,100 +1,94 @@
-# Functional Specification
 
-## 1. CLI Interface Definition
+# Functional Specification: `ascii-tree-reorg` v0.2.0
 
-### Command Signature
+## 1. Subsystem Decomposition
 
-```bash
-python run.py \
-  --tree-file <PATH> \
-  --source-dir <PATH> \
-  --output-root <PATH> \
-  [--task-name <STR>] \
-  [--indent-width <INT>] \
-  [--move]
-  ```  
-
-### Argument Specification  
-
-| **_Option Flag_** | **_Long Flag_**  | **_Required_** | **_Default_**               | **_Type_** | **_Description_**                                    |
-|-------------------|------------------|----------------|-----------------------------|------------|------------------------------------------------------|
-| `-t`              | `--tree-file`    | No             | `data/inputs/structure.txt` | Path       | Path to plaintext file containing ASCII tree schema  |
-| `-s`              | `--source-dir`   | No             | `data/inputs/raw_archive`   | Path       | Path to folder containing unorganized files.         |
-| `-o`              | `--output-root`  | No             | `data/outputs/              | Path       | Target folder where run directories are created.     |
-| `-n`              | `--task-name`    | No             | `reorg_job`                 | str        | Logical label used in timestamped run folder naming. |
-| `-w`              | `--indent-width` | No             | `4`                         | int        | Fallback indentation step width in characters.       |
-| (none)            | `--move`         | No             | `False`                     | bool       | Flag: moves files instead of copying.                |  
-
----
-
-## 2. GUI Interface Definition ( `run_ui.py` )  
-
-The Tkinter desktop interface exposes:  
-
-1. **Source Folder Picker:** Sets the path to the unorganized source files.  
-2. **Destination Folder Picker:** Sets the target output root directory.  
-3. **Execution Options:**  
-    - _Move files_: Switches transfer from `shutil.copy2` to `shutil.move` .
-    - _Overwrite existing files_: Overwrites duplicate files already existing at target.  
-    - _Clean relocated / Orphan files_: Scans for and removes files that were moved or sit as orphans outside the designated root.  
-    - _Indent Width_: Numeric spinbox configuring fallback indentation pitch.  
-4. **ASCII Tree Editor:** Live scrollable text area supporting loading from disk, editing, and clearing.  
-5. **Execution Progress & Console Output:** Thread-safe terminal display capturing live logs, node operations, warnings, and completion status.  
-
----
-
-## 3. Core Operational Workflows  
-
-### 3.1 Indentation Detection & Path Parsing Workflow  
-
-```text
-[Raw ASCII Line] 
-       │
-       ▼
-[Strip Comments ('#') & Carriage Returns]
-       │
-       ▼
-[Extract Glyph Prefix: `│`, `├`, `└`, `─`, ` `]
-       │
-       ├── Prefix Length == 0  ──> Root Level (Depth = 0)
-       └── Prefix Length > 0   ──> Calculate Depth = Length // IndentationStep
-       │
-       ▼
-[Clean Leaf Name & Classify: Dir if ends with '/', File otherwise]
-       │
-       ▼
-[Update Stack by Popping Until Stack Depth < Current Depth]
-       │
-       ▼
-[Resolve Relative Path: Stack[-1].Path / Cleaned Leaf Name]
+```ascii-tree-reorg (v0.2.0)
+├── Core Engine
+│   ├── IndentationDetector   (Pitch calculation via GCD)
+│   ├── AsciiTreeParser       (Tree text -> List[TreeNode])
+│   ├── StructureAuditor      (Static analysis of collisions)
+│   ├── ConflictResolver      (Disambiguation & Candidate metadata)
+│   └── DirectoryTreeGenerator (Folder -> ASCII text) [New in v0.2.0]
+├── Execution Engine
+│   └── DirectoryReorganizer  (Filesystem placement, copy/move, cleanup)
+├── Interfaces
+│   ├── CLI                   (run.py / Application)
+│   └── Desktop UI (Tkinter)  (run_ui.py / AsciiTreeReorgApp) [Dual-Tab in v0.2.0]
+└── Utilities
+└── ConfigLoader          (JSON configuration manager)
 ```
 
-### 3.2 Interactive Conflict Resolution Workflow  
+## 2. API & Component Contracts
 
-When multiple files with the same name are discovered during source indexing:  
+### 2.1 `DirectoryTreeGenerator` (`src/ascii_tree_reorg/core/generator.py`)  
 
-1. Automated file placement pauses for that specific node.  
-2. System presents destination path: `Destination: <node.relative_path>` .
-3. Displays candidate table:  
-    - Candidate index ( `[1..N]` ).
-    - Relative path from source root.  
-    - Size in Kilobytes.
-    - Last modified timestamp ( `YYYY-MM-DD HH:MM:SS` ).
-4. User selects index or enters `'s'` to skip.
-5. If moved, selected item is removed from candidate tracking.  
+Generates ASCII tree representations of local directories.
 
-### 3.3 Orphan Purge Workflow  
+```python
+@dataclass
+class GeneratorOptions:
+    include_files: bool = True
+    max_depth: Optional[int] = None
+    indent_step: int = 4
+    sort_dirs_first: bool = True
 
-Before placing nodes:  
+class DirectoryTreeGenerator:
+    def __init__(self, root_dir: Path, options: Optional[GeneratorOptions] = None): ...
+    def generate(self) -> str: ...
 
-1. Read the allowed top-level directory names from the parsed tree nodes ( `node.relative_path.parts[0]` ).
-2. Scan the immediate children of `target_dir` .
-3. If an item in `target_dir` is not in the set of allowed root names (and is not `.git` or `.gitkeep` ), purge it recursively.
+```
 
----
+### 2.2 `AsciiTreeParser` (`src/ascii_tree_reorg/core/parser.py`)
 
-## 4. Error Handling and Edge Cases  
+Parses tree text files into structured nodes.
 
-- **Missing Files:** Files declared in the ASCII tree that do not exist in the source folder produce a `[MISSING]` warning in the log, allowing the remaining files to process normally.  
-- **Malformed Indentation:** If the indentation character lengths cannot be factored by the detected GCD or configured step, execution halts with a descriptive `ValueError` before any filesystem changes occur.  
-- **Case Sensitivity:** On Linux/macOS, path comparisons follow standard case sensitivity; on Windows, case-preserving matching applies.
+```python
+class AsciiTreeParser:
+    def __init__(self, file_path: Path, fallback_width: int = 4): ...
+    def parse(self) -> List[TreeNode]: ...
+
+```
+
+### 2.3 `DirectoryReorganizer` (`src/ascii_tree_reorg/engine/reorganizer.py`)
+
+Executes disk operations with support for progress observation.
+
+```python
+class DirectoryReorganizer:
+    def __init__(
+        self,
+        source_dir: Path,
+        target_dir: Path,
+        move_files: bool = False,
+        overwrite: bool = True,
+        clean_relocated: bool = False
+    ): ...
+    def execute(self, nodes: List[TreeNode]) -> None: ...
+    def _place_single_node(self, node: TreeNode) -> None: ...
+    def _cleanup_old_positions(self, nodes: List[TreeNode]) -> None: ...
+
+```
+
+## 3. UI Specifications (`src/ascii_tree_reorg/ui/tkinter_app.py`)
+
+* **Window Title**: `ASCII Tree Reorganizer & Generator v0.2.0`  
+
+* **Tab 1: Reconstruct from Tree**:  
+
+* Source path entry with browse dialog.
+* Destination root path entry with browse dialog.
+* Checkboxes: `Move files`, `Overwrite existing`, `Clean relocated`.
+* Indentation pitch spinbox.
+* Tree text editor with `Load Tree File...` and `Clear` buttons.
+* Real-time progress bar + dynamic status string.
+* Threaded worker execution to prevent UI freezing.
+* Color-coded console output (redirected `stdout`).
+
+* **Tab 2: Generate Tree from Folder**:  
+
+* Target folder entry with browse dialog.
+* `Include files` toggle.
+* `Max Depth` spinbox (`0` = unlimited).
+* `Scan and Generate ASCII` action button.
+* Readout text widget with `Copy to Clipboard` and `Save to .txt File...` actions.

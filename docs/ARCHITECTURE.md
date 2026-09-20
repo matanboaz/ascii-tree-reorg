@@ -1,127 +1,39 @@
-# Architecture & Systems Design
 
-## 1. Architectural Philosophy
+# Software Architecture Document & Decision Records
 
-The application follows object-oriented design and SOLID principles:
+## 1. System Architecture
 
-* **Single Responsibility**: Distinct modules handle indentation derivation, syntax parsing, pre-flight auditing, conflict resolution, directory instantiation, and UI presentation.
-* **Zero Dependency Constraint**: Strictly standard library modules (`pathlib`, `shutil`, `argparse`, `dataclasses`, `re`, `math`, `collections`, `datetime`, `tkinter`).
-* **Immutability**: Parsed tree nodes are represented as frozen dataclasses (`TreeNode`).
+The package follows a clean Layered / Hexagonal Architecture:  
 
----
-
-## 2. Component Class Diagram  
-
-```
-       +-------------------+
-       |    Application    |
-       +-------------------+
-                 |
-      +----------+----------+
-      |          |          |
-      ▼          ▼          ▼
-+------------------+ +-------------+ +--------------------+
-| AsciiTreeParser  | | Directory   | |  StructureAuditor  |
-+------------------+ | Reorganizer | +--------------------+
-          |          +-------------+           |
-          ▼                 |                  |
-+------------------+        |                  |
-|  TreeNode        |<-------+------------------+
-|  (Data Model)    |
-+------------------+
-          ^
-          |
-+---------------------+
-| IndentationDetector |
-+---------------------+
-          |
-          v
-+---------------------+
-|  ConflictResolver   |
-+---------------------+
-```
+* **Domain Models (`core.models`)**: Pure immutable dataclasses (`TreeNode`).
+* **Core Logic (`core.*`)**: Stateless parsing, AST-like hierarchy construction, directory tree serialization, and auditing.
+* **Infrastructure / Engine (`engine.*`)**: Stateful filesystem adapters wrapping Python's `shutil` and `os` primitives.
+* **Application Adapters (`app.py`, `ui.tkinter_app`)**: CLI entrypoints and GUI controllers that drive the domain and infrastructure layers.
 
 ---
 
-## 3. Module Responsibilities
+## 2. Architecture Decision Records (ADRs)
 
-### `core/models.py`
+### ADR-001: Dynamic GCD Indentation Detection  
 
-Defines `TreeNode`:
+* **Status**: Accepted
+* **Context**: ASCII trees use varying indentations (2 spaces, 4 spaces, tabs). Hardcoding width causes silent hierarchy flattens or crashes.
+* **Decision**: Compute the Greatest Common Divisor of all prefix indentation lengths across non-empty lines. If mismatch occurs against user preferences, auto-adapt and log a warning.
 
-```python
-@dataclass(frozen=True)
-class TreeNode:
-    name: str
-    relative_path: Path
-    is_directory: bool
-    depth: int
-    line_number: int  
-```
+### ADR-002: Default Non-Destructive Copying  
 
-### `core/parser.py`
+* **Status**: Accepted
+* **Context**: Machine learning datasets (`.parquet`, `.pkl`) and source code archives cannot be recovered easily if lost during an interrupted move.
+* **Decision**: Standardize on `shutil.copy2` by default. Gate `shutil.move` strictly behind user flags.
 
-Contains:  
+### ADR-003: Bidirectional Functionality in a Single Package (v0.2.0)  
 
-* `IndentationDetector`: Analyzes line prefixes using `math.gcd` over all non-zero prefix lengths to determine structural pitch (2-space, 4-space, etc.).
-* `AsciiTreeParser`: Tokenizes tree text, cleans Unicode box glyphs, maintains the hierarchy stack, and constructs `TreeNode` instances.  
+* **Status**: Accepted
+* **Context**: Operators restructuring archives often need to inspect an existing reference project, export its ASCII layout, and feed that layout into reconstruction jobs elsewhere.
+* **Decision**: Introduce `DirectoryTreeGenerator` and expose both Reconstruction and Generation capabilities within a unified dual-tab GUI and modular API.
 
-### `core/auditor.py`  
+### ADR-004: Threaded Execution in Desktop GUI  
 
-Contains `StructureAuditor` :  
-
-* Verifies whether duplicate paths were declared inside the tree schema.
-* Detects when identical filenames exist across different folders.
-* Scans the source directory for basename collisions before execution begins.  
-
-### `core/resolver.py`
-
-Contains `ConflictResolver` :  
-
-* Manages terminal-based user disambiguation for duplicate source files.
-* Gathers `os.stat_result` metadata and presents formatted candidate options.  
-
-### `engine/reorganizer.py`
-
-Contains `DirectoryReorganizer` :
-
-* Recursively indexes source files into a hash map ( `Dict[str, List[Path]]` ).
-* Provides `_purge_parent_orphans` to remove obsolete top-level entries from previous runs.
-* Provides `_cleanup_old_positions` to prevent duplicate file copies when reorganizing in-place.
-* Dispatches folder creation ( `mkdir` ) and file placement ( `shutil.copy2` or `shutil.move` ).
-
-### `ui/tkinter_app.py`  
-
-Provides `AsciiTreeReorgApp` :
-
-* Threaded desktop UI preventing interface lockups during file copies.  
-* Standard stream redirection ( `TextRedirector` ) to display live execution logs.  
-
----
-
-## 4. Architecture Decision Records (ADRs)  
-
-### ADR-001: Automatic Indentation Pitch Detection via GCD
-
-* **Status:** Accepted
-
-* **Context:** ASCII trees in documentation frequently mix 2-space, 4-space, or custom indentation widths.
-* **Decision:** Calculate the Greatest Common Divisor of non-zero prefix lengths. Adapt automatically if the detected GCD differs from the configured default.
-* **Consequence:** Handles arbitrary formatting without requiring manual configuration adjustments.  
-
-### ADR-002: Default Non-Destructive Copy ( `shutil.copy2` )
-
-* **Status:** Accepted
-
-* **Context:** Operating on clinical research drops or irreplaceable model weights requires absolute protection against accidental data deletion.
-* **Decision:** Default to copying while preserving file timestamps and modes. Require explicit user action ( `--move` or checkbox) for file moves.
-* **Consequence:** Safe, repeatable execution with zero risk of source data loss.  
-
-### ADR-003: Pure Standard Library Implementation
-
-* **Status:** Accepted
-
-* **Context:** Deployment environments include air-gapped hospital clusters, secure enclaves, and minimal Docker containers without internet access.
-* **Decision:** Avoid all external dependencies ( `click`, `rich`, `pydantic` ). Use standard library only.
-
-* **Consequence:** Zero dependency management overhead; functions out-of-the-box on any Python 3.9+ installation.
+* **Status**: Accepted
+* **Context**: Transferring large datasets or thousands of small files blocks the Tkinter main event loop, causing "Not Responding" window states.
+* **Decision**: Isolate the reorganization worker inside a background `threading.Thread(daemon=True)`. Progress bar state and log streams dispatch back to the Tkinter UI thread via `after(0, ...)`.  

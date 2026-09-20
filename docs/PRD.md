@@ -1,66 +1,51 @@
-# Product Requirements Document (PRD)
+# Product Requirements Document (PRD): `ascii-tree-reorg`
 
-## 1. Document Overview
-* **Product Name:** ASCII Tree Directory Reorganizer (`ascii-tree-reorg`)
-* **Status:** Approved / Production Ready
-* **Target Platforms:** Cross-platform (Windows 10/11, Windows Server, Linux, macOS)
-* **Execution Environment:** Python 3.9+ runtime, zero external pip dependencies.
+## Version: 0.2.0
 
----
+### 1. Executive Summary  
 
-## 2. Executive Summary & Problem Statement
-Engineers, data scientists, and researchers frequently receive project deliverables, model weights, and clinical datasets as flat archives or flattened zip bundles. These drops are typically accompanied by a textual ASCII directory tree diagram in a `README.md` or specification document showing where each file should live.
+`ascii-tree-reorg` bridges the gap between system documentation and disk state. Originally developed to solve the ingestion and sorting of unorganized archives matching an ASCII specification, version 0.2.0 adds bidirectional capability: users can generate compliant ASCII tree documentation directly from any folder, as well as reconstruct folder structures from ASCII trees.
 
-Manually recreating complex nested folders and moving files one by one is error-prone, labor-intensive, and risks file loss or name collisions.
+### 2. Core Personas & Use Cases  
 
-`ascii-tree-reorg` provides an automated, idempotent, and deterministic utility (via CLI and desktop GUI) to parse plaintext ASCII/Unicode directory tree structures, validate directory syntax, audit potential collisions, and place files into their exact target destinations.
+* **Data Scientists / Researchers**: Ingesting messy zip archives containing models (`.pkl`), metrics (`.parquet`, `.csv`), and code (`.py`, `.json`), matching them to documented benchmark topologies.
+* **Systems & DevOps Engineers**: Generating structure documentation for code repositories and validating deployment layouts in air-gapped environments.
+* **Technical Authors**: Producing standardized ASCII folder trees for software documentation and verification.
 
----
+### 3. Functional Requirements
 
-## 3. Goals & Objectives
-* **Automation:** Fully eliminate manual directory creation and file movement.
-* **Safety First:** Default to non-destructive copying (`shutil.copy2`); require explicit opt-in for destructive moves (`--move`).
-* **Deterministic Layout Parsing:** Automatically parse variations of terminal trees (`├──`, `└──`, `│`, standard indents) while detecting indentation pitch via Greatest Common Divisor (GCD) math.
-* **Collision Transparency:** Audit duplicate filenames and provide interactive disambiguation when multiple source files share the same name across different folders.
-* **Orphan Cleanup:** Automatically purge obsolete, relocated files and top-level directory debris left over from previous faulty executions.
-* **Air-Gapped Ready:** Strict reliance on Python's built-in standard library with zero third-party dependencies.
+#### FR-1: ASCII Tree Parsing & Indentation Normalization  
 
----
+* Must support Unicode (`├──`, `└──`, `│`) and ASCII (`|--`, `\--`) branch notations.
+* Must compute indentation depth automatically using GCD across prefix offsets, adapting between 2-space, 3-space, and 4-space formats.
+* Must reject structurally irregular indentation patterns prior to disk execution.
 
-## 4. User Personas
-* **Data Scientist / NLP Researcher:** Receives model checkpoints (`.pkl`), feature stores (`.parquet`), and tabular data (`.csv`) in flat archives and needs to map them to reproducible pipelines inside secure hospital or enterprise networks.
-* **DevOps / Systems Engineer:** Automates project boilerplate setup and restores standard structures across air-gapped environments without package management (`pip`) access.
+#### FR-2: Structural Auditing & Pre-flight Conflict Checks  
 
----
+* Must detect duplicate relative paths defined within the same tree file.
+* Must identify instances where the same filename appears in multiple subdirectories across the desired tree.
+* Must index the source directory to locate missing files and duplicate source basenames.
 
-## 5. Scope & Requirements Matrix
+#### FR-3: Safe Filesystem Execution  
 
-### 5.1 In-Scope
-* Parsing plaintext tree structures (UTF-8) containing directory indicators (`/`) and file basenames.
-* Dynamic detection of indentation width using prefix GCD analysis.
-* Non-destructive copy as system default, preserving file metadata (`mtime`, `mode`).
-* Destructive move behind explicit user flag/toggle.
-* Interactive disambiguation with candidate file metadata (path, size, timestamp) when collisions occur.
-* Pre-flight structural and ambiguity auditing.
-* Top-level orphan folder and file cleanup (`_purge_parent_orphans`).
-* Desktop GUI built with Tkinter.
+* Default file operation is non-destructive copy (`shutil.copy2`), maintaining timestamps and file attributes.
+* Move mode (`shutil.move`) is strictly opt-in via `--move` or GUI checkbox.
+* Target outputs are written to isolated, timestamped subdirectories inside the output root.
 
-### 5.2 Out-of-Scope
-* Modifying or extracting directly inside compressed archives (`.zip`, `.tar.gz`) without prior extraction.
-* Automatic fuzzy matching for misspelled filenames.
-* Web-based multi-user server interface.
+#### FR-4: Interactive Conflict Resolution  
 
----
+* When multiple source files match a single target file node, the resolver prompts the operator with full metadata (relative path, size in KB, last modified timestamp).
+* Includes a non-interactive headless fallback for CI/CD and batch pipelines.
 
-## 6. Functional Requirements Matrix
+#### FR-5: Directory Tree Generation (v0.2.0)  
 
-| Requirement ID | Type | Description | Priority |
-| :--- | :--- | :--- | :--- |
-| **REQ-PRD-01** | Core | Read ASCII tree structure from file or interactive GUI editor. | P0 |
-| **REQ-PRD-02** | Core | Parse directories vs. files via trailing slash conventions or hierarchical depth. | P0 |
-| **REQ-PRD-03** | Core | Copy files preserving file metadata (`mtime`, `mode`) by default. | P0 |
-| **REQ-PRD-04** | Core | Support moving files in-place using `--move` CLI flag or GUI checkbox. | P0 |
-| **REQ-PRD-05** | Usability | Detect indentation step dynamically using prefix character analysis. | P1 |
-| **REQ-PRD-06** | Safety | Audit duplicate paths in the tree and ambiguous names before execution. | P1 |
-| **REQ-PRD-07** | Safety | Provide interactive prompt displaying size/mtime when identical source files exist. | P1 |
-| **REQ-PRD-08** | Reliability | Clean obsolete/orphan files sitting outside the root tree hierarchy. | P1 |
+* Must scan arbitrary directories and output standard tree representations.
+* Must allow limiting traversal depth (`max_depth`).
+* Must allow toggling file visibility (directories only vs. full files and folders).
+* Must provide UI options to copy generated text directly to the clipboard or export to `.txt`.
+
+### 4. Non-Functional Requirements  
+
+* **Zero External Runtime Dependencies**: Standard library only (`pathlib`, `shutil`, `argparse`, `tkinter`, etc.).
+* **Air-Gapped Operation**: Completely offline execution capability with no network calls or telemetry.
+* **Platform Support**: Linux, macOS, and Windows (10/11, Server).

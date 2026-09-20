@@ -1,66 +1,22 @@
-# AI Agent Specification (`ascii-tree-reorg`)
+# AI Agent Specification: `ascii-tree-reorg` v0.2.0
 
-This specification provides comprehensive guidance for autonomous coding agents (Claude Code, Cursor, Windsurf, Codex) modifying or extending this codebase.
+## System Prompt Context  
 
----
+You are working on `ascii-tree-reorg`, an offline, zero-external-dependency Python package designed for bidirectional ASCII directory tree operations: reconstruction from text trees, and tree diagram generation from existing directories.
 
-## PART I: UNIFIED SYSTEM CONTEXT
+## Architecture Boundaries  
 
-`ascii-tree-reorg` is a zero-dependency, object-oriented Python 3.9+ application designed to reconstruct folder hierarchies from plaintext ASCII directory trees. The utility operates in both headless CLI and Tkinter GUI modes.
+1. **Dependencies**: Pure Python standard library only (`pathlib`, `shutil`, `argparse`, `dataclasses`, `re`, `math`, `collections`, `datetime`, `tkinter`). No external packages are permitted in core or UI code.
+2. **Path Handling**: All filesystem paths must use `pathlib.Path`. Explicit `.resolve()` must be used when anchoring root trees.
+3. **Encoding**: File read/write operations must default to `utf-8` with fallback to `latin-1` where necessary.
+4. **Data Isolation**: Generated file trees and reconstructed outputs must always target timestamped subfolders under `data/outputs/` to avoid overwriting inputs.
 
-### Key Architectural Invariants
+## Micro-Task Validation Checklist for AI Agents  
 
-1. **Zero External Dependencies**: Standard library modules only. Never introduce `pip` requirements for core functionality.
-2. **Safe by Default**: File movements default to `shutil.copy2`. Destructive moves (`shutil.move`) must require explicit user activation.
-3. **Dynamic Indentation Detection**: Do not hardcode line indentation offsets. Always use `IndentationDetector.detect()` with GCD math.
-4. **Separation of Concerns**: Parsing (`core/parser.py`), auditing (`core/auditor.py`), and file operations (`engine/reorganizer.py`) must remain decoupled.
-5. **Thread Safety in UI**: Long-running filesystem operations in `ui/tkinter_app.py` must run inside daemon threads, updating UI state through `.after()` callbacks.
-
----
-
-## PART II: MICRO-TASK SPECIFICATIONS
-
-### Task 1: Tree Parsing & Model Construction
-
-* **Target:** `src/ascii_tree_reorg/core/parser.py`
-* **Rules:**
-  * Clean line prefixes using regex `^([│\s├└─\-+|]*)`.
-  * Calculate depth via integer division: `prefix_len // step_width`.
-  * Strip inline comments starting with `#`.
-  * Maintain parent path stack `List[Tuple[int, Path]]`.
-  * Directories are identified by trailing slashes or presence of child nodes.
-
-### Task 2: Indentation Pitch Detection
-
-* **Target:** `src/ascii_tree_reorg/core/parser.py` -> `IndentationDetector`
-* **Rules:**
-  * Compute GCD across all non-zero prefix lengths using `math.gcd`.
-  * If calculated GCD differs from default width, log warning and return calculated GCD.
-  * If lines are uneven and indivisible, raise `ValueError`.
-
-### Task 3: Directory Reorganization & Placement
-
-* **Target:** `src/ascii_tree_reorg/engine/reorganizer.py`
-* **Rules:**
-  * Index source files recursively into a `defaultdict(list)`.
-  * For directory nodes, create directory with `parents=True, exist_ok=True`.
-  * For file nodes, retrieve source path from indexed map.
-  * If multiple candidates exist, invoke `ConflictResolver.prompt_selection()`.
-  * If moving, remove used candidate from index to prevent duplicate assignments.
-
-### Task 4: Orphan & Parent Cleanup
-
-* **Target:** `src/ascii_tree_reorg/engine/reorganizer.py` -> `_purge_parent_orphans`
-* **Rules:**
-  * Collect all valid root folder names from `desired_nodes[].relative_path.parts[0]`.
-  * Iterate items in `target_dir`.
-  * Delete any directory or file whose name is not in the set of allowed roots (ignoring `.git` and `.gitkeep`).
-
----
-
-## PART III: ACCEPTANCE CRITERIA FOR MODIFICATIONS
-
-1. All changes must pass `pytest tests/test_reorganize.py` with zero errors.
-2. No external libraries added to `pyproject.toml` dependencies.
-3. CLI (`run.py`) and GUI (`run_ui.py`) entrypoints must function identically regarding file placement.
-4. Code must conform to PEP 8 standards with type hints on all function signatures.
+* When modifying `parser.py`: Verify that `IndentationDetector.detect` never returns a pitch less than 1 (guard against zero-division).
+* When modifying `generator.py`: Verify that directory sorting places folders before files when `sort_dirs_first=True` and respects `max_depth`.
+* When modifying `tkinter_app.py`:
+  * Ensure both `launch_gui` and `run_gui` exist as callable module-level exports.
+  * Ensure long-running disk operations are delegated to `threading.Thread(daemon=True)`.
+  * Ensure UI state updates pass through `widget.after(0, ...)`.
+* When running tests: Ensure all fixtures in `tests/test_reorganize.py` use `tmp_path` to prevent residue on disk.
