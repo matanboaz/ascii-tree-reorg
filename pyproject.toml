@@ -3,20 +3,26 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ascii_tree_reorg"
-version = "0.2.0"
-description = "Directory restructurer and ASCII tree generator."
-authors = [{ name = "Boaz Refael Matan" }]
-readme = "docs/PRD.md"
+name = "ascii-tree-reorg"
+version = "0.2.1"
+description = "Bidirectional ASCII directory tree reconstructor and generator."
+readme = "README.md"
+authors = [{ name = "Boaz Matan" }]
+license = { text = "MIT" }
 requires-python = ">=3.9"
-dependencies = []
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
 
 [project.optional-dependencies]
 ui = ["streamlit>=1.20.0"]
 test = ["pytest>=7.0.0"]
 
 [project.scripts]
-ascii-reorg = "ascii_tree_reorg.app:main"
+ascii-tree-reorg = "ascii_tree_reorg.app:main"
+ascii-tree-reorg-gui = "ascii_tree_reorg.ui.tkinter_app:launch_gui"
 
 [tool.setuptools.packages.find]
 where = ["src"]
