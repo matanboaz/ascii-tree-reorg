@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ascii-tree-reorg"
-version = "0.2.1"
+version = "0.2.2"
 description = "Bidirectional ASCII directory tree reconstructor and generator."
 readme = "README.md"
 authors = [{ name = "Boaz Matan" }]
