@@ -8,10 +8,10 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Optional
 
-from ..core.events import OperationEvent
-from ..core.generator import DirectoryTreeGenerator, GeneratorOptions
-from ..core.parser import AsciiTreeParser
-from ..engine.reorganizer import DirectoryReorganizer
+from ascii_tree_reorg.core.events import OperationEvent
+from ascii_tree_reorg.core.generator import DirectoryTreeGenerator, GeneratorOptions
+from ascii_tree_reorg.core.parser import AsciiTreeParser
+from ascii_tree_reorg.engine.reorganizer import DirectoryReorganizer
 
 
 def send(event: OperationEvent) -> None:
