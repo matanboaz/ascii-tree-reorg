@@ -75,3 +75,37 @@ def test_bridge_module_imports_work_for_frozen_entrypoint():
 
     assert callable(bridge.main)
     assert callable(bridge.send)
+
+
+def test_bridge_accepts_an_actual_conflict_candidate(tmp_path):
+    source = tmp_path / "source"
+    destination = tmp_path / "destination"
+    (source / "a").mkdir(parents=True)
+    (source / "b").mkdir()
+    first = source / "a" / "note.txt"
+    first.write_text("first", encoding="utf-8")
+    (source / "b" / "note.txt").write_text("second", encoding="utf-8")
+    environment = os.environ.copy()
+    environment["PYTHONPATH"] = str(Path(__file__).parents[1] / "src")
+    process = subprocess.Popen(
+        [sys.executable, "-m", "ascii_tree_reorg.desktop.bridge"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        cwd=tmp_path,
+        env=environment,
+    )
+    process.stdin.write(json.dumps({
+        "operation": "reconstruct", "source": str(source),
+        "destination": str(destination), "tree": "note.txt",
+    }) + "\n")
+    process.stdin.flush()
+    conflict = json.loads(process.stdout.readline())
+    assert conflict["kind"] == "conflict"
+    assert str(first) in conflict["data"]["candidates"]
+    process.stdin.write(json.dumps({"type": "resolve_conflict", "choice": str(first)}) + "\n")
+    process.stdin.flush()
+    stdout, _ = process.communicate(timeout=10)
+    assert json.loads(stdout.splitlines()[-1])["kind"] == "complete"
+    assert (destination / "note.txt").read_text(encoding="utf-8") == "first"
