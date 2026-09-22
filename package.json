@@ -1,0 +1,66 @@
+{
+  "name": "ascii-tree-reorg-desktop",
+  "private": true,
+  "version": "0.3.0",
+  "type": "module",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "build:ui": "tsc -b && vite build",
+    "build:desktop": "npm run build:ui && tsc -p desktop/electron/tsconfig.json",
+    "test:ui": "vitest run",
+    "preview": "vite preview",
+    "start:desktop": "npm run build:desktop && electron .",
+    "package": "npm run build:desktop && electron-builder --dir",
+    "package:release": "npm run build:desktop && electron-builder"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "latest",
+    "vite": "latest",
+    "typescript": "latest",
+    "react": "latest",
+    "react-dom": "latest"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "electron": "latest",
+    "vitest": "latest",
+    "jsdom": "latest",
+    "electron-builder": "latest"
+  },
+  "build": {
+    "appId": "io.github.matanboaz.asciitreereorg",
+    "productName": "Canopy",
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "desktop-sidecar",
+        "to": "desktop-sidecar"
+      }
+    ],
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "zip"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ]
+    }
+  }
+}
