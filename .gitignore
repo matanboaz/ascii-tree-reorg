@@ -29,3 +29,9 @@ models/*
 !models/.gitkeep
 
 *.spec
+
+# Desktop frontend build artifacts
+node_modules/
+dist/
+dist-electron/
+*.tsbuildinfo
