@@ -1,20 +1,29 @@
-import {app,BrowserWindow,dialog,ipcMain} from 'electron'
+import {app,BrowserWindow,dialog,ipcMain,session, type IpcMainInvokeEvent} from 'electron'
 import {spawn, type ChildProcessWithoutNullStreams} from 'node:child_process'
 import {fileURLToPath} from 'node:url'
 import path from 'node:path'
+import {isTrustedRendererUrl,validateConflictChoice,validateJobRequest} from './security.js'
 
 const here=path.dirname(fileURLToPath(import.meta.url))
 let worker:ChildProcessWithoutNullStreams|undefined
 let runId=0
+function requireTrustedSender(event:IpcMainInvokeEvent){
+ const url=event.senderFrame?.url||event.sender.getURL()
+ if(!isTrustedRendererUrl(url,process.env.VITE_DEV_SERVER_URL))throw new Error('Blocked IPC from an untrusted renderer.')
+}
 function createWindow(){
- const win=new BrowserWindow({width:1240,height:850,minWidth:820,minHeight:640,backgroundColor:'#f7f6f1',titleBarStyle:'hiddenInset',webPreferences:{preload:path.join(here,'preload.js'),contextIsolation:true,nodeIntegration:false}})
+ const win=new BrowserWindow({width:1240,height:850,minWidth:820,minHeight:640,backgroundColor:'#f7f6f1',titleBarStyle:'hiddenInset',webPreferences:{preload:path.join(here,'preload.js'),contextIsolation:true,nodeIntegration:false,sandbox:true}})
+ win.webContents.setWindowOpenHandler(()=>({action:'deny'}))
+ win.webContents.on('will-navigate',(event,url)=>{if(!isTrustedRendererUrl(url,process.env.VITE_DEV_SERVER_URL))event.preventDefault()})
  if(process.env.VITE_DEV_SERVER_URL) win.loadURL(process.env.VITE_DEV_SERVER_URL)
  else win.loadFile(path.join(here,'../dist/index.html'))
 }
-app.whenReady().then(()=>{createWindow();app.on('activate',()=>{if(BrowserWindow.getAllWindows().length===0)createWindow()})})
+app.whenReady().then(()=>{session.defaultSession.setPermissionRequestHandler((_contents,_permission,callback)=>callback(false));createWindow();app.on('activate',()=>{if(BrowserWindow.getAllWindows().length===0)createWindow()})})
 app.on('window-all-closed',()=>{worker?.kill();if(process.platform!=='darwin')app.quit()})
-ipcMain.handle('dialog:directory',async()=>{const result=await dialog.showOpenDialog({properties:['openDirectory']});return result.canceled?null:result.filePaths[0]})
-ipcMain.handle('job:start',(event,request)=>{
+ipcMain.handle('dialog:directory',async event=>{requireTrustedSender(event);const result=await dialog.showOpenDialog({properties:['openDirectory']});return result.canceled?null:result.filePaths[0]})
+ipcMain.handle('job:start',(event,rawRequest)=>{
+ requireTrustedSender(event)
+ const request=validateJobRequest(rawRequest)
  worker?.kill(); const current=++runId
  const send=(payload:unknown)=>{if(current===runId&&!event.sender.isDestroyed())event.sender.send('job:event',payload)}
  const packaged=path.join(process.resourcesPath,'desktop-sidecar',process.platform==='win32'?'ascii-tree-reorg-sidecar.exe':'ascii-tree-reorg-sidecar')
@@ -31,5 +40,5 @@ ipcMain.handle('job:start',(event,request)=>{
  processForRun.stdin.on('error',()=>{})
  processForRun.stdin.write(JSON.stringify(request)+'\n')
 })
-ipcMain.handle('job:cancel',(event)=>{if(!worker)return;worker.kill();worker=undefined;runId++;if(!event.sender.isDestroyed())event.sender.send('job:event',{kind:'cancelled',message:'Operation cancelled. Files already copied remain in the destination.',level:'warning',current:0,total:0,data:{partial_results:true}})})
-ipcMain.handle('job:resolve',(_event,choice)=>worker?.stdin.write(JSON.stringify({type:'resolve_conflict',choice})+'\n'))
+ipcMain.handle('job:cancel',event=>{requireTrustedSender(event);if(!worker)return;worker.kill();worker=undefined;runId++;if(!event.sender.isDestroyed())event.sender.send('job:event',{kind:'cancelled',message:'Operation cancelled. Files already copied remain in the destination.',level:'warning',current:0,total:0,data:{partial_results:true}})})
+ipcMain.handle('job:resolve',(event,rawChoice)=>{requireTrustedSender(event);const choice=validateConflictChoice(rawChoice);worker?.stdin.write(JSON.stringify({type:'resolve_conflict',choice})+'\n')})
