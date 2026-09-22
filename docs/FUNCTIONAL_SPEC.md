@@ -1,17 +1,17 @@
-# Functional specification
+# Implemented functional specification
 
-## Reconstruction
+## CLI reconstruction
 
-Input: source, destination, ASCII tree, and optional move/overwrite/cleanup/dry-run settings. The parser validates the tree and the engine validates all destinations before placement. Duplicate source names become structured conflicts.
+Inputs are source folder, tree file, output root, task name, and indentation width. The CLI creates a timestamped run directory unless it is a dry run. Copy is default. Move, overwrite, cleanup, and dry run are explicit flags. Duplicate names are selected interactively. The parser and destination plan are validated before placement.
 
-## Generation
+## Tree generation
 
-Input: source folder, include-files setting, maximum depth, and indentation width. Output is a Unicode tree that round-trips through the strict parser.
+The Python generator accepts a source folder, include-files setting, maximum depth, indentation width, and optional ignore names. It emits a Unicode tree that round-trips through the strict parser. Canopy currently generates with files included and default depth/indentation settings.
 
-## Desktop
+## Canopy desktop
 
-Canopy provides reconstruction and generation. Native dialogs and the Python worker stay in Electron's main process. The renderer shows idle, running, conflict, success, and error states through a narrow preload API.
+Canopy supports safe copy-only reconstruction and tree generation. It provides native folder dialogs, editable tree text, progress, actual duplicate candidate choices, cancel, and success/error/partial-result messaging. It does not expose move, overwrite, cleanup, dry-run, generated-tree depth, generated-tree include-files, or indentation controls. Those remain CLI/API capabilities.
 
 ## Safety
 
-Copy is default. Move, overwrite, and cleanup are explicit. Dry run never writes. Traversal, absolute paths, drive-relative paths, and symlink escapes are rejected.
+Dry run never writes. Traversal, absolute paths, drive-relative paths, and symlink escapes are rejected. Cancellation is not transactional: already copied files remain. Missing or skipped files do not make a run atomic.
