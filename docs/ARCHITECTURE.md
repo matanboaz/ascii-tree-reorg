@@ -1,39 +1,16 @@
+# Architecture
 
-# Software Architecture Document & Decision Records
+- **Core domain**: parser, generator, models, audit, structured events, and conflict resolution.
+- **Filesystem engine**: validates containment before writes and emits typed operation events.
+- **CLI adapter**: parses terminal options and drives the engine.
+- **Desktop sidecar**: accepts newline-delimited JSON requests and emits JSON events. Human diagnostics go to stderr.
+- **Electron main process**: owns native dialogs and the Python child process.
+- **React renderer**: renders reconstruction, generation, progress, conflict, success, and error states through a context-isolated preload API.
 
-## 1. System Architecture
+## Decisions
 
-The package follows a clean Layered / Hexagonal Architecture:  
+Parsing uses one explicit indentation unit and fails with line numbers instead of guessing. Copying is the default; move, overwrite, and cleanup are opt-in. Every destination is validated before mutation.
 
-* **Domain Models (`core.models`)**: Pure immutable dataclasses (`TreeNode`).
-* **Core Logic (`core.*`)**: Stateless parsing, AST-like hierarchy construction, directory tree serialization, and auditing.
-* **Infrastructure / Engine (`engine.*`)**: Stateful filesystem adapters wrapping Python's `shutil` and `os` primitives.
-* **Application Adapters (`app.py`, `ui.tkinter_app`)**: CLI entrypoints and GUI controllers that drive the domain and infrastructure layers.
+Graphical clients consume `OperationEvent` records and provide conflict callbacks rather than parsing print output or invoking terminal input. Python remains the source of truth.
 
----
-
-## 2. Architecture Decision Records (ADRs)
-
-### ADR-001: Dynamic GCD Indentation Detection  
-
-* **Status**: Accepted
-* **Context**: ASCII trees use varying indentations (2 spaces, 4 spaces, tabs). Hardcoding width causes silent hierarchy flattens or crashes.
-* **Decision**: Compute the Greatest Common Divisor of all prefix indentation lengths across non-empty lines. If mismatch occurs against user preferences, auto-adapt and log a warning.
-
-### ADR-002: Default Non-Destructive Copying  
-
-* **Status**: Accepted
-* **Context**: Machine learning datasets (`.parquet`, `.pkl`) and source code archives cannot be recovered easily if lost during an interrupted move.
-* **Decision**: Standardize on `shutil.copy2` by default. Gate `shutil.move` strictly behind user flags.
-
-### ADR-003: Bidirectional Functionality in a Single Package (v0.2.0)  
-
-* **Status**: Accepted
-* **Context**: Operators restructuring archives often need to inspect an existing reference project, export its ASCII layout, and feed that layout into reconstruction jobs elsewhere.
-* **Decision**: Introduce `DirectoryTreeGenerator` and expose both Reconstruction and Generation capabilities within a unified dual-tab GUI and modular API.
-
-### ADR-004: Threaded Execution in Desktop GUI  
-
-* **Status**: Accepted
-* **Context**: Transferring large datasets or thousands of small files blocks the Tkinter main event loop, causing "Not Responding" window states.
-* **Decision**: Isolate the reorganization worker inside a background `threading.Thread(daemon=True)`. Progress bar state and log streams dispatch back to the Tkinter UI thread via `after(0, ...)`.  
+The duplicated Streamlit implementations and Tkinter shell were retired after Canopy reached feature parity. Keeping three UIs caused behavior drift and left unsafe worker-thread widget updates in the legacy path.

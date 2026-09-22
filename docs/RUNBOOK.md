@@ -1,84 +1,35 @@
-# Operations & Packaging Runbook
+# Runbook
 
-## 1. Environment & Setup
+## Python
 
-### Requirements  
-
-* Python 3.9+ (standard library only).
-* UTF-8 compatible terminal or console.
-* PyInstaller (only required if compiling to `.exe`).
-
----
-
-## 2. Standard Maintenance Workflows
-
-### Running Locally  
-
-```powershell
-# Run the Desktop Application
-python run_ui.py
-
-# Run CLI Task
-python run.py --task-name baseline_run
-
+```bash
+python -m venv .venv
+. .venv/bin/activate  # Windows: .venv\Scripts\activate
+python -m pip install --upgrade pip
+python -m pip install ".[test]" build twine
+python -m pytest -q
+python -m build
+python -m twine check dist/*
 ```
 
-### Running Unit & Integration Tests
+## Desktop
 
-```powershell
-pytest tests/ -v
-
+```bash
+npm ci
+npm run dev
+npm run build:desktop
+python -m pip install ".[desktop-build]"
+python scripts/build_desktop_sidecar.py
+npm run package:release
 ```
 
----
+Build each desktop package on its target OS. Never copy a sidecar across operating systems or architectures.
 
-## 3. PyInstaller Windows `.exe` Build Procedure
+## Release
 
-To compile a clean, standalone executable for distribution:
+1. Update `src/ascii_tree_reorg/__init__.py`; packaging reads that version dynamically.
+2. Align `package.json` and current-version docs.
+3. Run Python tests, desktop compilation, package build, and `twine check`.
+4. Merge through review and publish a GitHub release tagged `vX.Y.Z`.
 
-### Step 1: Clean Artifacts
-
-```powershell
-Remove-Item -Recurse -Force .\build, .\dist, .\*.spec -ErrorAction SilentlyContinue
-Get-ChildItem -Path . -Include __pycache__, .pytest_cache -Recurse -Directory | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-
-```
-
-### Step 2: Compile Executable
-
-```powershell
-pyinstaller --noconfirm --onedir --windowed --name "AsciiTreeReorg" `
-  --add-data "configs;configs" `
-  --paths "src" `
-  run_ui.py
-
-```
-
-### Step 3: Verify Output
-
-Launch `dist\AsciiTreeReorg\AsciiTreeReorg.exe` and confirm:
-
-1. Window title displays `ASCII Tree Reorganizer & Generator v0.3.0`.
-2. Both tabs load cleanly.
-3. Test a quick tree generation on a local directory.
-
----
-
-## 4. Git Release & Version Bumping Checklist
-
-When releasing a new version:
-
-1. Update `version = "X.Y.Z"` in `pyproject.toml`.
-2. Update `__version__ = "X.Y.Z"` in `src/ascii_tree_reorg/__init__.py`.
-3. Update the window title in `src/ascii_tree_reorg/ui/tkinter_app.py`.
-4. Stage only source and documentation files (do NOT stage `dist/`, `build/`, or `.exe` files):  
-
-    ```powershell
-    git status
-    git add src/ docs/ README.md pyproject.toml run.py run_ui.py tests/
-    git commit -m "chore(release): bump version to vX.Y.Z"
-    git tag "vX.Y.Z"
-    git push origin main --tags
-    ```
-  
-5. *(Optional)* Compress `dist/AsciiTreeReorg/` into a `.zip` archive and attach it to the GitHub Release page as a pre-built binary.  
+The release workflow rejects a tag that does not match the Python package version.
