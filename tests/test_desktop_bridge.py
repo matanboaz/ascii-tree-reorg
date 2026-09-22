@@ -68,3 +68,10 @@ def test_bridge_reports_errors_as_events(tmp_path):
 
     assert events[-1]["kind"] == "complete"
     assert any(event["kind"] == "missing" for event in events)
+
+
+def test_bridge_module_imports_work_for_frozen_entrypoint():
+    from ascii_tree_reorg.desktop import bridge
+
+    assert callable(bridge.main)
+    assert callable(bridge.send)
