@@ -41,7 +41,7 @@ class TextRedirector(io.StringIO):
 class AsciiTreeReorgApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("ASCII Tree Reorganizer & Generator v0.2.0")
+        self.title("ASCII Tree Reorganizer & Generator v0.3.0")
         self.geometry("980x820")
         self.minsize(800, 640)
 

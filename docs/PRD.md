@@ -1,6 +1,6 @@
 # Product Requirements Document (PRD): `ascii-tree-reorg`
 
-## Version: 0.2.0
+## Version: 0.3.0
 
 ### 1. Executive Summary  
 

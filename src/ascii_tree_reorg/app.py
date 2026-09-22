@@ -1,6 +1,7 @@
 import argparse
 import datetime
 import sys
+from importlib.resources import as_file, files
 from pathlib import Path
 from .core.auditor import StructureAuditor
 from .core.parser import AsciiTreeParser
@@ -22,9 +23,10 @@ def build_output_directory(output_root: Path, task_name: str, create: bool = Tru
 
 
 def main():
-    repo_root = Path(__file__).resolve().parent.parent.parent
-    default_config_file = repo_root / "configs" / "default_config.json"
-    conf = load_configuration(default_config_file)
+    repo_root = Path.cwd()
+    config_resource = files("ascii_tree_reorg.resources").joinpath("default_config.json")
+    with as_file(config_resource) as default_config_file:
+        conf = load_configuration(default_config_file)
 
     parser = argparse.ArgumentParser(
         description="Reorganize loose files into a structured hierarchy defined by an ASCII tree."

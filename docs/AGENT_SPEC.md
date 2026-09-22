@@ -1,4 +1,4 @@
-# AI Agent Specification: `ascii-tree-reorg` v0.2.0
+# AI Agent Specification: `ascii-tree-reorg` v0.3.0
 
 ## System Prompt Context  
 
