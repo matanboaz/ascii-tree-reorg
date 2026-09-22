@@ -41,7 +41,12 @@ class DirectoryTreeGenerator:
 
 ### 2.2 `AsciiTreeParser` (`src/ascii_tree_reorg/core/parser.py`)
 
-Parses tree text files into structured nodes.
+Parses tree text files into structured nodes using explicit rules:
+
+* A comment line starts with `#` followed by a space or end of line; `#` anywhere else is part of the name.
+* Box-drawing prefixes are tokenized into fixed-width units (ancestor guides plus a `├── `/`└── ` connector). All units in a file share one width; mixed or ragged indentation fails with a line-numbered error.
+* An entry is a directory when it ends in `/` or has children; otherwise it is a file, so a single-file root stays a file.
+* Entry names must be plain portable names: path separators, `..` segments, and absolute or drive-relative paths are rejected.
 
 ```python
 class AsciiTreeParser:
