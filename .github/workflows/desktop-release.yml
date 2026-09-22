@@ -1,0 +1,130 @@
+name: Desktop release artifacts
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Package ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: linux-x64
+          - os: macos-14
+            label: macos-arm64
+          - os: windows-latest
+            label: windows-x64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install and test
+        run: |
+          npm ci
+          npm run test:ui
+          python -m pip install --upgrade pip ".[test,desktop-build]"
+          python -m pytest -q
+      - name: Verify release tag matches application version
+        if: github.event_name == 'release'
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          APP_VERSION=$(node -p "require('./package.json').version")
+          PYTHON_VERSION=$(python -c "from ascii_tree_reorg import __version__; print(__version__)")
+          test "$RELEASE_TAG" = "v$APP_VERSION"
+          test "$APP_VERSION" = "$PYTHON_VERSION"
+
+      - name: Build frozen sidecar
+        run: python scripts/build_desktop_sidecar.py
+      - name: Build native installers and ZIP
+        env:
+          CSC_LINK: ${{ secrets.DESKTOP_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.DESKTOP_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.DESKTOP_APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.DESKTOP_APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.DESKTOP_APPLE_TEAM_ID }}
+        run: npm run package:release
+      - name: Smoke packaged archive and write checksums
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            SIDECAR="release/linux-unpacked/resources/desktop-sidecar/ascii-tree-reorg-sidecar"
+            test -x "$SIDECAR"
+            echo '{"operation":"generate","source":".","include_files":false,"max_depth":1}' | "$SIDECAR" > packaged-events.ndjson
+            python -c "import json; e=[json.loads(x) for x in open('packaged-events.ndjson')]; assert e[-1]['kind']=='complete'"
+          else
+            ZIP=$(find release -maxdepth 1 -type f -name '*.zip' | head -1)
+            test -n "$ZIP"
+            python scripts/smoke_desktop_archive.py "$ZIP"
+          fi
+          python scripts/write_checksums.py release "SHA256SUMS-${{ matrix.label }}.txt"
+      - name: Require and verify macOS signature for published releases
+        if: github.event_name == 'release' && runner.os == 'macOS'
+        shell: bash
+        run: |
+          test -n "$CSC_LINK" && test -n "$APPLE_ID" && test -n "$APPLE_APP_SPECIFIC_PASSWORD" && test -n "$APPLE_TEAM_ID"
+          ZIP=$(find release -maxdepth 1 -type f -name '*.zip' | head -1)
+          ditto -x -k "$ZIP" signed-app
+          APP=$(find signed-app -maxdepth 2 -name '*.app' -type d | head -1)
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          xcrun stapler validate "$APP"
+        env:
+          CSC_LINK: ${{ secrets.DESKTOP_CSC_LINK }}
+          APPLE_ID: ${{ secrets.DESKTOP_APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.DESKTOP_APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.DESKTOP_APPLE_TEAM_ID }}
+      - name: Require and verify Windows signature for published releases
+        if: github.event_name == 'release' && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not $env:CSC_LINK) { throw "DESKTOP_CSC_LINK is required for a published release" }
+          $installer = Get-ChildItem release -Filter *.exe | Select-Object -First 1
+          if (-not $installer) { throw "No Windows installer found" }
+          $signature = Get-AuthenticodeSignature $installer.FullName
+          if ($signature.Status -ne "Valid") { throw "Invalid installer signature: $($signature.Status)" }
+        env:
+          CSC_LINK: ${{ secrets.DESKTOP_CSC_LINK }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: canopy-${{ matrix.label }}
+          path: |
+            release/*.zip
+            release/*.dmg
+            release/*.exe
+            release/*.AppImage
+            release/*.deb
+            release/SHA256SUMS-*.txt
+          if-no-files-found: error
+
+  attach:
+    name: Attach artifacts to GitHub release
+    if: github.event_name == 'release'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: canopy-*
+          path: artifacts
+          merge-multiple: false
+      - name: Upload native artifacts and checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" artifacts/*/* --clobber
