@@ -95,8 +95,8 @@ class AsciiTreeReorgApp(tk.Tk):
         opts_frame.pack(fill=tk.X, pady=5)
 
         self.move_var = tk.BooleanVar(value=False)
-        self.overwrite_var = tk.BooleanVar(value=True)
-        self.clean_relocated_var = tk.BooleanVar(value=True)
+        self.overwrite_var = tk.BooleanVar(value=False)
+        self.clean_relocated_var = tk.BooleanVar(value=False)
 
         ttk.Checkbutton(opts_frame, text="Move files (delete source)", variable=self.move_var).pack(
             side=tk.LEFT, padx=6
