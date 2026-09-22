@@ -13,7 +13,9 @@
     "start:desktop": "npm run build:desktop && electron .",
     "package": "npm run build:desktop && electron-builder --dir",
     "package:release": "npm run build:desktop && electron-builder",
-    "check:package-size": "node scripts/check-package-size.mjs release/linux-unpacked/resources/app.asar"
+    "check:package-size": "node scripts/check-package-size.mjs release/linux-unpacked/resources/app.asar",
+    "smoke:archive": "python scripts/smoke_desktop_archive.py",
+    "checksums": "python scripts/write_checksums.py release"
   },
   "dependencies": {
     "react": "19.3.0",
@@ -61,12 +63,23 @@
       "target": [
         "AppImage",
         "deb"
-      ]
+      ],
+      "maintainer": "Boaz Matan <matanboaz@users.noreply.github.com>",
+      "category": "Utility",
+      "desktop": {
+        "entry": {
+          "Name": "Canopy",
+          "Comment": "Safe ASCII tree workspace"
+        }
+      }
     },
     "directories": {
       "output": "release"
     }
   },
   "description": "Safe bidirectional ASCII tree workspace desktop app",
-  "author": "Boaz Matan"
+  "author": {
+    "name": "Boaz Matan",
+    "email": "matanboaz@users.noreply.github.com"
+  }
 }
