@@ -1,5 +1,5 @@
 
-# Functional Specification: `ascii-tree-reorg` v0.2.0
+# Functional Specification: `ascii-tree-reorg` v0.3.0
 
 ## 1. Subsystem Decomposition
 
@@ -21,7 +21,7 @@
 
 ## 2. API & Component Contracts
 
-### 2.1 `DirectoryTreeGenerator` (`src/ascii_tree_reorg/core/generator.py`)  
+### 2.1 `DirectoryTreeGenerator` (`src/ascii_tree_reorg/core/generator.py`)
 
 Generates ASCII tree representations of local directories. Ancestor guides and connectors always share the `indent_step` width (minimum 2), so output parses back through `AsciiTreeParser` at any step.
 
@@ -77,9 +77,9 @@ class DirectoryReorganizer:
 
 ## 3. UI Specifications (`src/ascii_tree_reorg/ui/tkinter_app.py`)
 
-* **Window Title**: `ASCII Tree Reorganizer & Generator v0.2.0`  
+* **Window Title**: `ASCII Tree Reorganizer & Generator v0.3.0`
 
-* **Tab 1: Reconstruct from Tree**:  
+* **Tab 1: Reconstruct from Tree**:
 
 * Source path entry with browse dialog.
 * Destination root path entry with browse dialog.
@@ -90,7 +90,7 @@ class DirectoryReorganizer:
 * Threaded worker execution to prevent UI freezing.
 * Color-coded console output (redirected `stdout`).
 
-* **Tab 2: Generate Tree from Folder**:  
+* **Tab 2: Generate Tree from Folder**:
 
 * Target folder entry with browse dialog.
 * `Include files` toggle.

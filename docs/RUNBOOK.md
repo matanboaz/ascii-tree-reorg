@@ -58,7 +58,7 @@ pyinstaller --noconfirm --onedir --windowed --name "AsciiTreeReorg" `
 
 Launch `dist\AsciiTreeReorg\AsciiTreeReorg.exe` and confirm:
 
-1. Window title displays `ASCII Tree Reorganizer & Generator v0.2.0`.
+1. Window title displays `ASCII Tree Reorganizer & Generator v0.3.0`.
 2. Both tabs load cleanly.
 3. Test a quick tree generation on a local directory.
 
