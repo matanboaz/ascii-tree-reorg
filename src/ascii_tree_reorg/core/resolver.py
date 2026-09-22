@@ -1,8 +1,11 @@
 import datetime
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import Callable, List, Optional
 from .models import TreeNode
+
+
+ConflictChoice = Callable[[TreeNode, List[Path], Path], Optional[Path]]
 
 
 class ConflictResolver:

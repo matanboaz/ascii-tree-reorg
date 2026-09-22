@@ -1,9 +1,10 @@
 import collections
 import shutil
 from pathlib import Path
-from typing import Dict, List, Set
+from typing import Callable, Dict, List, Optional, Set
+from ..core.events import OperationEvent
 from ..core.models import TreeNode
-from ..core.resolver import ConflictResolver
+from ..core.resolver import ConflictChoice, ConflictResolver
 
 
 class DirectoryReorganizer:
@@ -28,6 +29,8 @@ class DirectoryReorganizer:
         overwrite: bool = False,
         clean_relocated: bool = False,
         dry_run: bool = False,
+        event_callback: Optional[Callable[[OperationEvent], None]] = None,
+        conflict_resolver: Optional[ConflictChoice] = None,
     ):
         self.source_dir = source_dir.resolve()
         self.target_dir = target_dir.resolve()
@@ -35,8 +38,34 @@ class DirectoryReorganizer:
         self.overwrite = overwrite
         self.clean_relocated = clean_relocated
         self.dry_run = dry_run
+        self.event_callback = event_callback
+        self.conflict_resolver = conflict_resolver or ConflictResolver.prompt_selection
         self.source_index: Dict[str, List[Path]] = collections.defaultdict(list)
         self._index_source()
+
+    def _emit(
+        self,
+        kind: str,
+        message: str,
+        *,
+        level: str = "info",
+        current: int = 0,
+        total: int = 0,
+        **data,
+    ) -> None:
+        """Print for CLI compatibility and notify structured clients."""
+        print(message)
+        if self.event_callback is not None:
+            self.event_callback(
+                OperationEvent(
+                    kind=kind,
+                    message=message,
+                    level=level,
+                    current=current,
+                    total=total,
+                    data=data,
+                )
+            )
 
     def _index_source(self) -> None:
         if not self.source_dir.exists():
@@ -89,16 +118,16 @@ class DirectoryReorganizer:
 
             if item.name not in allowed_roots:
                 if self.dry_run:
-                    print(f"[DRY RUN] Would delete undeclared item from {self.target_dir.name}: {item.name}")
+                    self._emit("delete", f"[DRY RUN] Would delete undeclared item from {self.target_dir.name}: {item.name}", dry_run=True, path=str(item))
                     continue
-                print(f"[ORPHAN PURGE] Deleting undeclared item from {self.target_dir.name}: {item.name}")
+                self._emit("delete", f"[ORPHAN PURGE] Deleting undeclared item from {self.target_dir.name}: {item.name}", path=str(item))
                 try:
                     if item.is_dir() and not item.is_symlink():
                         shutil.rmtree(item)
                     else:
                         item.unlink()
                 except OSError as e:
-                    print(f"[WARN] Failed to purge '{item.name}': {e}")
+                    self._emit("warning", f"[WARN] Failed to purge '{item.name}': {e}", level="warning", path=str(item))
 
     def _cleanup_old_positions(self, desired_nodes: List[TreeNode]) -> None:
         """Removes duplicate or stale copies of files sitting in obsolete locations inside target_dir.
@@ -126,13 +155,13 @@ class DirectoryReorganizer:
             if fname in expected_paths_by_name:
                 if rel_pos not in expected_paths_by_name[fname]:
                     if self.dry_run:
-                        print(f"[DRY RUN] Would remove stale copy: {rel_pos}")
+                        self._emit("delete", f"[DRY RUN] Would remove stale copy: {rel_pos}", dry_run=True, path=str(rel_pos))
                         continue
-                    print(f"[CLEANUP] Removing stale copy: {rel_pos}")
+                    self._emit("delete", f"[CLEANUP] Removing stale copy: {rel_pos}", path=str(rel_pos))
                     try:
                         existing_file.unlink()
                     except OSError as e:
-                        print(f"[WARN] Failed to delete stale copy '{existing_file}': {e}")
+                        self._emit("warning", f"[WARN] Failed to delete stale copy '{existing_file}': {e}", level="warning", path=str(existing_file))
 
     def _place_single_node(self, node: TreeNode) -> None:
         action = "Moving" if self.move_files else "Copying"
@@ -142,7 +171,7 @@ class DirectoryReorganizer:
         if node.is_directory:
             if self.dry_run:
                 if not dest_path.exists():
-                    print(f"[DRY RUN] Would create directory: {node.relative_path}")
+                    self._emit("directory", f"[DRY RUN] Would create directory: {node.relative_path}", dry_run=True, path=str(node.relative_path))
                 return
             dest_path.mkdir(parents=True, exist_ok=True)
             return
@@ -151,19 +180,25 @@ class DirectoryReorganizer:
         candidates = self.source_index.get(filename, [])
         if not candidates:
             if not dest_path.exists():
-                print(f"[MISSING] File '{node.name}' for '{node.relative_path}' not found in source.")
+                self._emit("missing", f"[MISSING] File '{node.name}' for '{node.relative_path}' not found in source.", level="warning", path=str(node.relative_path))
             else:
-                print(f"[KEEP] Existing file already in place: {node.relative_path}")
+                self._emit("keep", f"[KEEP] Existing file already in place: {node.relative_path}", path=str(node.relative_path))
             return
 
         if len(candidates) > 1:
             if self.dry_run:
-                print(
-                    f"[DRY RUN] Would prompt to resolve {len(candidates)} conflicting "
-                    f"sources for '{node.relative_path}'."
+                self._emit(
+                    "conflict",
+                    f"[DRY RUN] Would prompt to resolve {len(candidates)} conflicting sources "
+                    f"for '{node.relative_path}'.",
+                    level="warning",
+                    dry_run=True,
+                    path=str(node.relative_path),
+                    candidates=[str(path) for path in candidates],
                 )
                 return
-            selected_source = ConflictResolver.prompt_selection(node, candidates, self.source_dir)
+            self._emit("conflict", f"[CONFLICT] {len(candidates)} source candidates for '{node.relative_path}'.", level="warning", path=str(node.relative_path), candidates=[str(path) for path in candidates])
+            selected_source = self.conflict_resolver(node, candidates, self.source_dir)
             if selected_source is None:
                 return
         else:
@@ -171,25 +206,25 @@ class DirectoryReorganizer:
 
         try:
             if dest_path.exists() and selected_source.resolve().samefile(dest_path.resolve()):
-                print(f"[ALREADY IN PLACE] {node.relative_path}")
+                self._emit("keep", f"[ALREADY IN PLACE] {node.relative_path}", path=str(node.relative_path))
                 return
         except OSError:
             pass
 
         if dest_path.exists():
             if not self.overwrite:
-                print(f"[SKIP] Target already exists (use overwrite to replace): {node.relative_path}")
+                self._emit("skip", f"[SKIP] Target already exists (use overwrite to replace): {node.relative_path}", level="warning", path=str(node.relative_path))
                 return
             elif self.dry_run:
-                print(f"[DRY RUN] Would overwrite: {selected_source.name} -> {node.relative_path}")
+                self._emit("file", f"[DRY RUN] Would overwrite: {selected_source.name} -> {node.relative_path}", dry_run=True, path=str(node.relative_path))
                 return
             else:
-                print(f"[OVERWRITE] {selected_source.name} -> {node.relative_path}")
+                self._emit("file", f"[OVERWRITE] {selected_source.name} -> {node.relative_path}", path=str(node.relative_path))
         elif self.dry_run:
-            print(f"[DRY RUN] Would {verb}: {selected_source.name} -> {node.relative_path}")
+            self._emit("file", f"[DRY RUN] Would {verb}: {selected_source.name} -> {node.relative_path}", dry_run=True, path=str(node.relative_path))
             return
         else:
-            print(f"[{action.upper()}] {selected_source.name} -> {node.relative_path}")
+            self._emit("file", f"[{action.upper()}] {selected_source.name} -> {node.relative_path}", path=str(node.relative_path))
 
         try:
             dest_path.parent.mkdir(parents=True, exist_ok=True)
@@ -201,7 +236,7 @@ class DirectoryReorganizer:
             else:
                 shutil.copy2(str(selected_source), str(dest_path))
         except OSError as err:
-            print(f"[ERROR] Failed to write '{dest_path}': {err}")
+            self._emit("error", f"[ERROR] Failed to write '{dest_path}': {err}", level="error", path=str(node.relative_path))
 
     def execute(self, nodes: List[TreeNode]) -> None:
         # Validate every destination before any mutation, so a single hostile
@@ -210,11 +245,14 @@ class DirectoryReorganizer:
             self._resolve_destination(node)
 
         if self.dry_run:
-            print("[DRY RUN] Planning only; no filesystem changes will be made.")
+            self._emit("start", "[DRY RUN] Planning only; no filesystem changes will be made.", dry_run=True)
         if self.clean_relocated:
             self._purge_parent_orphans(nodes)
             self._cleanup_old_positions(nodes)
-        for node in nodes:
+        total = len(nodes)
+        for current, node in enumerate(nodes, start=1):
             self._place_single_node(node)
+            if self.event_callback is not None:
+                self.event_callback(OperationEvent("progress", f"Processed {current}/{total}: {node.name}", current=current, total=total, data={"path": str(node.relative_path)}))
         if self.dry_run:
-            print("[DRY RUN] Plan complete; no filesystem changes were made.")
+            self._emit("complete", "[DRY RUN] Plan complete; no filesystem changes were made.", dry_run=True)
