@@ -144,3 +144,43 @@ def test_generator_output_round_trips(tmp_path):
     assert by_path["sample/configs"].is_directory is True
     assert by_path["sample/configs/app.yaml"].is_directory is False
     assert by_path["sample/data.csv"].is_directory is False
+
+
+# --- Non-default generator indent round trips --------------------------------
+
+def _nested_sample(root: Path) -> None:
+    (root / "configs" / "app.yaml").parent.mkdir(parents=True)
+    (root / "configs" / "app.yaml").write_text("env: prod", encoding="utf-8")
+    (root / "data" / "raw").mkdir(parents=True)
+    (root / "data" / "raw" / "dataset.csv").write_text("a,b", encoding="utf-8")
+    (root / "README.md").write_text("hi", encoding="utf-8")
+
+
+@pytest.mark.parametrize("step", [2, 3, 4, 5, 8])
+def test_generator_round_trip_at_indent_step(tmp_path, step):
+    from ascii_tree_reorg.core.generator import GeneratorOptions
+
+    root = tmp_path / "sample"
+    root.mkdir()
+    _nested_sample(root)
+
+    tree_text = DirectoryTreeGenerator(
+        root, options=GeneratorOptions(indent_step=step)
+    ).generate()
+    tree_file = tmp_path / "tree.txt"
+    tree_file.write_text(tree_text, encoding="utf-8")
+
+    nodes = AsciiTreeParser(tree_file).parse()
+    by_path = {str(n.relative_path): n for n in nodes}
+    assert by_path["sample"].is_directory is True
+    assert by_path["sample/configs/app.yaml"].is_directory is False
+    assert by_path["sample/data/raw"].is_directory is True
+    assert by_path["sample/data/raw/dataset.csv"].depth == 3
+    assert by_path["sample/README.md"].is_directory is False
+
+
+def test_generator_rejects_too_small_indent_step(tmp_path):
+    from ascii_tree_reorg.core.generator import GeneratorOptions
+
+    with pytest.raises(ValueError, match="indent_step"):
+        GeneratorOptions(indent_step=1)

@@ -13,6 +13,12 @@ class GeneratorOptions:
     indent_step: int = 4
     ignore_patterns: Set[str] = None
 
+    def __post_init__(self) -> None:
+        if self.indent_step < 2:
+            raise ValueError(
+                f"indent_step must be at least 2, got {self.indent_step}."
+            )
+
     def get_ignore_set(self) -> Set[str]:
         default_ignores = {
             ".git",
@@ -48,6 +54,16 @@ class DirectoryTreeGenerator:
                 return True
         return False
 
+    def _connector(self, is_last: bool) -> str:
+        """Entry connector padded to exactly one indent unit.
+
+        Guides and connectors share the indent_step width so generated
+        trees always satisfy the strict parser, at any indent_step.
+        """
+        step = self.options.indent_step
+        dash_run = "─" * max(1, step - 2)
+        return ("└" if is_last else "├") + dash_run.ljust(step - 1)
+
     def _build_tree(self, current_dir: Path, prefix: str = "", current_depth: int = 0) -> List[str]:
         if self.options.max_depth is not None and current_depth >= self.options.max_depth:
             return []
@@ -55,7 +71,7 @@ class DirectoryTreeGenerator:
         try:
             raw_entries = [p for p in current_dir.iterdir() if not self._should_ignore(p.name)]
         except PermissionError:
-            return [f"{prefix}└── [Permission Denied]"]
+            return [f"{prefix}{self._connector(is_last=True)}[Permission Denied]"]
 
         # Filter out files if configured
         if not self.options.include_files:
@@ -67,18 +83,16 @@ class DirectoryTreeGenerator:
         lines: List[str] = []
         count = len(entries)
 
-        # Spacing adjustment based on indent_step
-        space_pad = " " * (self.options.indent_step - 1)
-
         for idx, entry in enumerate(entries):
             is_last = idx == (count - 1)
-            connector = "└── " if is_last else "├── "
+            connector = self._connector(is_last)
             display_name = f"{entry.name}/" if entry.is_dir() else entry.name
 
             lines.append(f"{prefix}{connector}{display_name}")
 
             if entry.is_dir():
-                continuation = " " * self.options.indent_step if is_last else f"│{space_pad}"
+                step = self.options.indent_step
+                continuation = " " * step if is_last else "│" + " " * (step - 1)
                 nested_lines = self._build_tree(
                     entry,
                     prefix=prefix + continuation,

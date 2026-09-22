@@ -23,7 +23,7 @@
 
 ### 2.1 `DirectoryTreeGenerator` (`src/ascii_tree_reorg/core/generator.py`)  
 
-Generates ASCII tree representations of local directories.
+Generates ASCII tree representations of local directories. Ancestor guides and connectors always share the `indent_step` width (minimum 2), so output parses back through `AsciiTreeParser` at any step.
 
 ```python
 @dataclass
