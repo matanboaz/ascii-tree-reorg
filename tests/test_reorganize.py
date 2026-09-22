@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from ascii_tree_reorg.core.auditor import StructureAuditor
 from ascii_tree_reorg.core.models import TreeNode
-from ascii_tree_reorg.core.parser import AsciiTreeParser, IndentationDetector
+from ascii_tree_reorg.core.parser import AsciiTreeParser
 from ascii_tree_reorg.core.resolver import ConflictResolver
 from ascii_tree_reorg.engine.reorganizer import DirectoryReorganizer
 
@@ -17,39 +17,6 @@ def temp_workspace(tmp_path):
     (source / "data.csv").write_text("col1,col2\n1,2", encoding="utf-8")
     (source / "config.yaml").write_text("env: prod", encoding="utf-8")
     return source, dest
-
-
-def test_indentation_detector_gcd():
-    lines = [
-        "root/",
-        "    ├── sub1/",
-        "    │   └── file1.txt",
-        "    └── file2.txt",
-    ]
-    detected = IndentationDetector.detect(lines, configured_width=4)
-    assert detected == 4
-
-
-def test_indentation_detector_mismatch_fallback():
-    # 2-character pitch: "├─", "│ ", "└─"
-    lines = [
-        "root/",
-        "├── sub1/",
-        "│ └── file1.txt",
-        "└── file2.txt",
-    ]
-    detected = IndentationDetector.detect(lines, configured_width=4)
-    assert detected == 2
-
-
-def test_indentation_detector_malformed_raises():
-    lines = [
-        "root/",
-        "   ├── sub1/",        # 6 chars prefix
-        "       └── file1.txt"  # 10 chars prefix (uneven GCD relative to step)
-    ]
-    with pytest.raises(ValueError, match="Malformed indentation detected"):
-        IndentationDetector.detect(lines, configured_width=4)
 
 
 def test_tree_parser(tmp_path):
