@@ -22,7 +22,6 @@ test = ["pytest>=7.0.0"]
 
 [project.scripts]
 ascii-tree-reorg = "ascii_tree_reorg.app:main"
-ascii-tree-reorg-gui = "ascii_tree_reorg.ui.tkinter_app:launch_gui"
 
 [tool.setuptools.dynamic]
 version = { attr = "ascii_tree_reorg.__version__" }
