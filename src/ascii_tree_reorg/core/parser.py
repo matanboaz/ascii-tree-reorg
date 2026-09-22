@@ -49,6 +49,31 @@ class IndentationDetector:
         return configured_width
 
 
+
+def _validate_entry_name(name: str, line_number: int) -> None:
+    """Rejects entry names that are not plain portable file names.
+
+    Tree entries must be single names. Path separators, traversal segments,
+    and absolute paths are rejected so a crafted tree can never make the
+    reorganizer write outside the chosen target directory.
+    """
+    if name in (".", ".."):
+        raise ValueError(
+            f"Line {line_number}: entry '{name}' is not allowed. "
+            "Tree entries must be plain file or directory names."
+        )
+    if "/" in name or "\\" in name:
+        raise ValueError(
+            f"Line {line_number}: entry '{name}' contains a path separator. "
+            "Nested paths, '..' segments, and absolute paths are not allowed; "
+            "use indentation to express hierarchy."
+        )
+    if len(name) >= 2 and name[1] == ":":
+        raise ValueError(
+            f"Line {line_number}: entry '{name}' looks like an absolute or "
+            "drive-relative path, which is not allowed."
+        )
+
 class AsciiTreeParser:
     """Parses raw ASCII tree text into structured TreeNode objects."""
 
@@ -156,6 +181,8 @@ class AsciiTreeParser:
 
             if not name:
                 continue
+
+            _validate_entry_name(name, line_no)
 
             # If stripping outer root, skip the first entry and shift all child depths down by 1
             if strip_outer_root:
